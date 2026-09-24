@@ -76,11 +76,12 @@ async function resolveTrack(raw) {
   };
 }
 
-export async function enqueue(member, raw) {
+const stations = ["1LIVE", "SWR3", "Bayern 3", "Deutschlandfunk", "Fritz", "WDR 2", "BBC Radio 1", "France Inter"];
+const radioServers = ["https://de1.api.radio-browser.info", "https://nl1.api.radio-browser.info", "https://at1.api.radio-browser.info"];
+
+async function playFound(member, found) {
   const channel = member?.voice?.channel;
   if (!channel) return "Du musst in einem Sprachkanal sein.";
-  const found = await resolveTrack(raw);
-  if (!found) return "Dazu gibt es keine frei spielbare Aufnahme. YouTube, Spotify und Apple Music durchsucht Axi nicht.";
   const state = room(member.guild);
   const same = state.connection?.joinConfig?.channelId === channel.id;
   if (!same) {
@@ -103,6 +104,38 @@ export async function enqueue(member, raw) {
   state.queue.push(found);
   if (state.player.state.status === AudioPlayerStatus.Idle && !state.current) advance(member.guild.id);
   return state.current?.url === found.url ? `Spielt: ${found.label}` : `In der Warteschlange: ${found.label}`;
+}
+
+export async function searchStations(query) {
+  const path = `/json/stations/search?name=${encodeURIComponent(query)}&limit=5&hidebroken=true&order=votes&reverse=true`;
+  for (const base of radioServers) {
+    const response = await fetch(base + path, { headers: { "User-Agent": "axi/1.0" }, signal: AbortSignal.timeout(8000) }).catch(() => null);
+    if (!response?.ok) continue;
+    const rows = await response.json().catch(() => null);
+    if (!Array.isArray(rows)) continue;
+    return rows.filter((item) => playable(item.url_resolved || item.url));
+  }
+  return [];
+}
+
+export async function tune(member, query) {
+  const name = String(query ?? "").trim().slice(0, 80);
+  if (!name) return `Bekannte Sender: ${stations.map((item) => item).join(", ")}\nZum Abspielen /radio und den Namen. Die Suche nimmt auch andere Sender.`;
+  const rows = await searchStations(name);
+  if (!rows.length) return `Keinen Sender für „${name}“ gefunden.`;
+  const best = rows[0];
+  const text = await playFound(member, {
+    url: playable(best.url_resolved || best.url),
+    label: `${best.name}${best.country ? ` · ${best.country}` : ""}`,
+  });
+  const more = rows.slice(1, 4).map((item) => item.name).filter(Boolean);
+  return more.length ? `${text}\nAndere Treffer: ${more.join(", ")}` : text;
+}
+
+export async function enqueue(member, raw) {
+  const found = await resolveTrack(raw);
+  if (!found) return "Dazu gibt es keine frei spielbare Aufnahme. YouTube, Spotify und Apple Music durchsucht Axi nicht.";
+  return playFound(member, found);
 }
 
 export function skip(guild) {

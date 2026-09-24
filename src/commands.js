@@ -1,6 +1,6 @@
 import { SlashCommandBuilder, ChannelType, PermissionFlagsBits } from "discord.js";
 import { askMind, knownModel } from "./ai.js";
-import { enqueue, leave, queueText, skip } from "./music.js";
+import { enqueue, leave, queueText, skip, tune } from "./music.js";
 import {
   addReminder,
   addWarn,
@@ -286,6 +286,7 @@ export const catalog = [
   ["stop", "Verlässt den Sprachkanal", "Musik"],
   ["warteschlange", "Zeigt, was noch läuft", "Musik"],
   ["aktuell", "Zeigt den aktuellen Titel", "Musik"],
+  ["radio", "Spielt einen Radiosender oder sucht einen", "Musik"],
   ["ticket", "Öffnet einen privaten Kanal", "Anliegen"],
   ["schliessen", "Schließt dieses Ticket", "Anliegen"],
   ["warn", "Verwarnung", "Moderation"],
@@ -348,6 +349,7 @@ export function slashCommands() {
     stop: (b) => b,
     warteschlange: (b) => b,
     aktuell: (b) => b,
+    radio: (b) => b.addStringOption((o) => o.setName("sender").setDescription("Name des Senders, leer zeigt bekannte Sender")),
     achtball: (b) => b.addStringOption((o) => o.setName("frage").setDescription("Frage").setRequired(true)),
     witz: (b) => b,
     ticket: (b) => b.addStringOption((o) => o.setName("thema").setDescription("Worum es geht").setRequired(true)),
@@ -670,6 +672,8 @@ export async function runCommand(name, ctx) {
     case "warteschlange":
     case "aktuell":
       return ctx.reply({ content: queueText(ctx.guild) });
+    case "radio":
+      return ctx.reply({ content: await tune(member, ctx.text("sender")) });
     case "achtball":
       return ctx.reply({ content: eight[Math.floor(Math.random() * eight.length)] });
     case "witz":
