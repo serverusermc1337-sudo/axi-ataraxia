@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { PERM_IDS, permMatrix, setPerm } from "./access.js";
 import { dropMemory, dropRepertoire, flag, memoryRows, putMemory, repertoireRows, setSetting, setting } from "./db.js";
 import { knownModel } from "./ai.js";
-import { takeBot } from "./commands.js";
+import { refreshCommands, takeBot } from "./commands.js";
 
 let liveClient = null;
 
@@ -54,7 +54,11 @@ function apply(body) {
   }
   if (typeof body.about === "string") setSetting("about", body.about.slice(0, 240));
   if (typeof body.welcome === "string" && body.welcome.trim()) putMemory("welcome", "text", body.welcome.slice(0, 240));
-  if (typeof body.status === "string" && body.status.trim()) setSetting("status", body.status.slice(0, 60));
+  if (typeof body.status === "string" && body.status.trim()) {
+    const text = body.status.slice(0, 60);
+    setSetting("status", text);
+    liveClient?.user?.setPresence({ activities: [{ name: text }], status: "online" }).catch(() => undefined);
+  }
   if (typeof body.model === "string") setSetting("model", knownModel(body.model));
   if (body.caps != null) setSetting("caps", String(Math.max(0, Math.min(100, Number(body.caps) || 0))));
   if (typeof body.blockLinks === "boolean") setSetting("block_links", body.blockLinks ? "an" : "aus");
@@ -64,6 +68,7 @@ function apply(body) {
       dropMemory("command", String(trigger));
       dropRepertoire(String(trigger));
     }
+    refreshCommands().catch(() => undefined);
   }
 }
 
@@ -231,14 +236,24 @@ function draw(state){
     const input = document.createElement("input");
     input.value = state[key] ?? "";
     input.placeholder = label;
+    input.dataset.key = key;
     input.style.cssText = "padding:8px;border-radius:8px;border:0;background:#111214;color:inherit";
-    input.onchange = () => save({[key]: key==="caps"? Number(input.value): input.value});
     texts.append(label, input);
   }
   const links = document.createElement("label");
   links.innerHTML = "<input type=checkbox "+(state.blockLinks?"checked":"")+"> Alle Links sperren";
-  links.querySelector("input").onchange = (e) => save({blockLinks:e.target.checked});
-  texts.append(links);
+  const saveBtn = document.createElement("button");
+  saveBtn.textContent = "Speichern und in Discord übernehmen";
+  saveBtn.style.cssText = "padding:10px;border:0;border-radius:8px;background:#5865f2;color:white";
+  saveBtn.onclick = async () => {
+    const patch = { blockLinks: links.querySelector("input").checked };
+    texts.querySelectorAll("input[data-key]").forEach((input) => {
+      patch[input.dataset.key] = input.dataset.key === "caps" ? Number(input.value) : input.value;
+    });
+    await save(patch);
+    document.getElementById("note").textContent = "Gespeichert. Der Status von Axi in Discord ist aktualisiert.";
+  };
+  texts.append(links, saveBtn);
   box("Texte und Filter", texts);
   const eat = document.createElement("div");
   eat.style.display = "grid";

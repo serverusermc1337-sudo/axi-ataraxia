@@ -522,7 +522,7 @@ export function allSlashCommands() {
   });
 }
 
-async function refreshSlash() {
+export async function refreshCommands() {
   const token = process.env.DISCORD_TOKEN;
   const clientId = process.env.DISCORD_CLIENT_ID;
   const guildId = process.env.DISCORD_GUILD_ID;
@@ -586,7 +586,7 @@ export async function takeBot(channel, botUser, liste = "") {
     putMemory("command", row.key, row.body);
     saveRepertoire(row.key, botUser.id, botUser.username, row.alias || "");
   }
-  await refreshSlash();
+  await refreshCommands();
   const label = (row) => (row.alias && !row.alias.startsWith("/") ? row.alias : `/${row.key}`);
   const extra = pages.length > 1 ? ` Weitere Seiten im Menü: ${pages.join(", ")}.` : "";
   return { ok: true, text: `${rows.length} Funktionen von ${botUser.username}: ${rows.map(label).join(", ")}.${extra}`.slice(0, 500) };
@@ -821,7 +821,7 @@ export async function runCommand(name, ctx) {
       if (!body || personalData(`${key} ${body}`) || infiltration(`${key} ${body}`)) return ctx.reply({ content: "Die Antwort speichere ich nicht." });
       putMemory("command", key, body);
       saveRepertoire(key, botUser.id, botUser.username);
-      await refreshSlash();
+      await refreshCommands();
       return ctx.reply({ content: `/${key} gehört jetzt Axi, Kategorie ${botUser.username}. ${botUser} führt sie nicht aus.` });
     }
     case "eatbot": {
@@ -929,7 +929,7 @@ export async function runCommand(name, ctx) {
       if (!KEY.test(key)) return ctx.reply({ content: "Den Befehl gibt es nicht." });
       dropMemory("command", key);
       dropRepertoire(key);
-      await refreshSlash();
+      await refreshCommands();
       return ctx.reply({ content: `/${key} ist aus dem Repertoire.` });
     }
     case "wissen": {
