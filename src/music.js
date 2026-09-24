@@ -33,7 +33,7 @@ export function playable(raw) {
 function room(guild) {
   let state = rooms.get(guild.id);
   if (state) return state;
-  const player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Pause } });
+  const player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
   state = { player, connection: null, queue: [], current: null, ffmpeg: null };
   player.on(AudioPlayerStatus.Idle, () => advance(guild.id));
   player.on("error", () => advance(guild.id));
@@ -51,11 +51,13 @@ function advance(guildId) {
   if (!item) return;
   const ffmpeg = spawn(
     "ffmpeg",
-    ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5", "-i", item.url, "-analyzeduration", "0", "-loglevel", "0", "-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1"],
-    { stdio: ["ignore", "pipe", "ignore"] },
+    ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5", "-user_agent", "axi/1.0", "-i", item.url, "-vn", "-ac", "2", "-ar", "48000", "-c:a", "libopus", "-b:a", "128k", "-f", "ogg", "pipe:1"],
+    { stdio: ["ignore", "pipe", "pipe"] },
   );
+  ffmpeg.stderr?.on("data", (chunk) => console.error(String(chunk).slice(0, 300)));
+  ffmpeg.on("error", (error) => console.error(error));
   state.ffmpeg = ffmpeg;
-  state.player.play(createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw }));
+  state.player.play(createAudioResource(ffmpeg.stdout, { inputType: StreamType.OggOpus }));
 }
 
 async function resolveTrack(raw) {
@@ -92,7 +94,7 @@ async function playFound(member, found) {
       channelId: channel.id,
       guildId: member.guild.id,
       adapterCreator: member.guild.voiceAdapterCreator,
-      selfDeaf: true,
+      selfDeaf: false,
     });
     state.connection.on("stateChange", (_, next) => {
       if (next.status === VoiceConnectionStatus.Disconnected) closed = String(next.closeCode ?? next.reason ?? "");
@@ -111,6 +113,9 @@ async function playFound(member, found) {
   }
   state.queue.push(found);
   if (state.player.state.status === AudioPlayerStatus.Idle && !state.current) advance(member.guild.id);
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+  const audible = state.player.state.status === AudioPlayerStatus.Playing || state.player.state.status === AudioPlayerStatus.Buffering;
+  if (!audible) return "Axi ist im Kanal, aber es kommt kein Ton. FFmpeg fehlt im Container oder der Sender antwortet nicht.";
   return state.current?.url === found.url ? `Spielt: ${found.label}` : `In der Warteschlange: ${found.label}`;
 }
 
