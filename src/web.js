@@ -3,6 +3,9 @@ import { createServer } from "node:http";
 import { PERM_IDS, permMatrix, setPerm } from "./access.js";
 import { dropMemory, dropRepertoire, flag, memoryRows, putMemory, repertoireRows, setSetting, setting } from "./db.js";
 import { knownModel } from "./ai.js";
+import { takeBot } from "./commands.js";
+
+let liveClient = null;
 
 function hash(value) {
   return createHash("sha256").update(String(value)).digest();
@@ -33,6 +36,7 @@ function snapshot() {
     repertoire: repertoireRows().map((row) => ({
       trigger: row.trigger,
       botName: row.bot_name,
+      alias: row.alias || "",
       body: memoryRows("command").find((command) => command.item_key === row.trigger)?.body ?? "",
     })),
     logChannel: setting("log_channel", ""),
@@ -63,7 +67,8 @@ function apply(body) {
   }
 }
 
-export function startWeb() {
+export function startWeb(client) {
+  liveClient = client;
   const password = process.env.WEB_PASSWORD;
   const port = Number(process.env.WEB_PORT || 8787);
   if (!password || password.length < 8) {
@@ -99,8 +104,37 @@ export function startWeb() {
       return;
     }
     if (url.pathname === "/api/state" && req.method === "GET") {
-      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(snapshot()));
+      guildLists().then((lists) => {
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ...snapshot(), ...lists }));
+      });
+      return;
+    }
+    if (url.pathname === "/api/eat" && req.method === "POST") {
+      let raw = "";
+      req.on("data", (chunk) => {
+        raw += chunk;
+        if (raw.length > 4000) req.destroy();
+      });
+      req.on("end", async () => {
+        try {
+          const body = JSON.parse(raw);
+          const guild = liveClient?.guilds?.cache?.get(process.env.DISCORD_GUILD_ID);
+          const channel = await guild?.channels?.fetch(String(body.channelId || "")).catch(() => null);
+          const member = await guild?.members?.fetch(String(body.botId || "")).catch(() => null);
+          if (!channel?.isTextBased?.() || !member?.user?.bot) {
+            res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, text: "Bot und Kanal wählen." }));
+            return;
+          }
+          const result = await takeBot(channel, member.user, "");
+          res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify(result));
+        } catch {
+          res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, text: "Das hat nicht geklappt." }));
+        }
+      });
       return;
     }
     if (url.pathname === "/api/state" && req.method === "POST") {
@@ -125,6 +159,19 @@ export function startWeb() {
     res.end(panel());
   });
   server.listen(port, "0.0.0.0", () => console.log(`Web-Einstellung auf Port ${port}`));
+}
+
+async function guildLists() {
+  const guild = liveClient?.guilds?.cache?.get(process.env.DISCORD_GUILD_ID);
+  if (!guild) return { bots: [], channels: [] };
+  if (!guild.members.cache.some((item) => item.user.bot && item.id !== liveClient.user?.id)) await guild.members.fetch().catch(() => undefined);
+  const bots = [...guild.members.cache.values()]
+    .filter((item) => item.user.bot && item.id !== liveClient.user?.id)
+    .map((item) => ({ id: item.id, name: item.user.username }));
+  const channels = [...guild.channels.cache.values()]
+    .filter((item) => item.isTextBased?.() && !item.isThread?.())
+    .map((item) => ({ id: item.id, name: item.name }));
+  return { bots, channels };
 }
 
 function page(error) {
@@ -193,11 +240,45 @@ function draw(state){
   links.querySelector("input").onchange = (e) => save({blockLinks:e.target.checked});
   texts.append(links);
   box("Texte und Filter", texts);
+  const eat = document.createElement("div");
+  eat.style.display = "grid";
+  eat.style.gap = "8px";
+  const botSel = document.createElement("select");
+  const chanSel = document.createElement("select");
+  for (const node of [botSel, chanSel]) node.style.cssText = "padding:8px;border-radius:8px;border:0;background:#111214;color:inherit";
+  for (const bot of state.bots || []) {
+    const option = document.createElement("option");
+    option.value = bot.id;
+    option.textContent = bot.name;
+    botSel.append(option);
+  }
+  for (const channel of state.channels || []) {
+    const option = document.createElement("option");
+    option.value = channel.id;
+    option.textContent = "#"+channel.name;
+    chanSel.append(option);
+  }
+  const button = document.createElement("button");
+  button.textContent = "Übernehmen";
+  button.style.cssText = "padding:10px;border:0;border-radius:8px;background:#5865f2;color:white";
+  const result = document.createElement("p");
+  result.style.margin = "0";
+  button.onclick = async () => {
+    button.disabled = true;
+    result.textContent = "Axi liest den Kanal.";
+    const answer = await (await fetch("/api/eat", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({botId: botSel.value, channelId: chanSel.value})})).json();
+    result.textContent = answer.text || "Nichts erkannt.";
+    button.disabled = false;
+    load();
+  };
+  if (!(state.bots || []).length) eat.textContent = "Keine anderen Bots im Cache. Discord muss online sein.";
+  else eat.append("Bot", botSel, "Kanal", chanSel, button, result);
+  box("Übernehmen", eat);
   const reps = document.createElement("div");
   if (!state.repertoire.length) reps.textContent = "Noch nichts von anderen Bots übernommen.";
   for (const row of state.repertoire) {
     const line = document.createElement("div");
-    line.textContent = row.botName+" /"+row.trigger+" — "+row.body+" ";
+    line.textContent = row.botName + " " + (row.alias || "/" + row.trigger) + " — " + row.body + " ";
     const button = document.createElement("button");
     button.textContent = "Entfernen";
     button.onclick = () => save({remove:[row.trigger]});

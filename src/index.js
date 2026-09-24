@@ -37,7 +37,7 @@ client.once(Events.ClientReady, async (ready) => {
     console.error(error);
   }
   ready.user.setPresence({ activities: [{ name: setting("status", "Ataraxia") }], status: "online" });
-  startWeb();
+  startWeb(client);
   console.log(`Axi ist online als ${ready.user.tag}`);
 });
 

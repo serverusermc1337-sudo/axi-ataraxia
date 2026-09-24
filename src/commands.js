@@ -567,6 +567,31 @@ export function helpPages(serverName) {
   return pages;
 }
 
+export async function takeBot(channel, botUser, liste = "") {
+  let source = String(liste ?? "").trim();
+  let pages = [];
+  if (!source && channel?.messages) {
+    const fetched = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+    const fromBot = [...(fetched?.values() ?? [])].filter((item) => item.author.id === botUser.id);
+    const heard = [...seenCalls(botUser.id).map((row) => `${row.alias} ${row.body}`), ...(fetched ? callsIn(fetched, botUser.id) : [])];
+    source = [...fromBot.map((item) => messageText(item)), ...heard].join("\n");
+    pages = [...new Set(fromBot.flatMap((item) => menuPages(item)))];
+  } else {
+    source = [...seenCalls(botUser.id).map((row) => `${row.alias} ${row.body}`), source].filter(Boolean).join("\n");
+  }
+  if (!source) return { ok: false, text: "In dem Kanal sind keine Nachrichten von diesem Bot. Dort muss die Hilfe stehen oder ein Aufruf wie m!play." };
+  const rows = eatenLines(source);
+  if (!rows.length) return { ok: false, text: "Nachrichten gesehen, aber keine Befehle erkannt. Hilfe öffnen oder m!play schreiben und die Antwort abwarten." };
+  for (const row of rows) {
+    putMemory("command", row.key, row.body);
+    saveRepertoire(row.key, botUser.id, botUser.username, row.alias || "");
+  }
+  await refreshSlash();
+  const label = (row) => (row.alias && !row.alias.startsWith("/") ? row.alias : `/${row.key}`);
+  const extra = pages.length > 1 ? ` Weitere Seiten im Menü: ${pages.join(", ")}.` : "";
+  return { ok: true, text: `${rows.length} Funktionen von ${botUser.username}: ${rows.map(label).join(", ")}.${extra}`.slice(0, 500) };
+}
+
 export async function runCommand(name, ctx) {
   const member = ctx.member;
   const target = ctx.userOf?.("mitglied") ?? ctx.user;
@@ -804,41 +829,8 @@ export async function runCommand(name, ctx) {
       await ctx.defer();
       const botUser = await resolveBot(ctx);
       if (!botUser) return ctx.edit({ content: "Nenn einen Bot aus den Vorschlägen." });
-      let source = ctx.text("liste").trim();
-      let pages = [];
-      let fromBot = [];
-      if (!source && ctx.channel?.messages) {
-        const fetched = await ctx.channel.messages.fetch({ limit: 100 }).catch(() => null);
-        const all = [...(fetched?.values() ?? [])];
-        fromBot = all.filter((item) => item.author.id === botUser.id);
-        const heard = [
-          ...seenCalls(botUser.id).map((row) => `${row.alias} ${row.body}`),
-          ...(fetched ? callsIn(fetched, botUser.id) : []),
-        ];
-        source = [...fromBot.map((item) => messageText(item)), ...heard].join("\n");
-        pages = [...new Set(fromBot.flatMap((item) => menuPages(item)))];
-      } else {
-        source = [...seenCalls(botUser.id).map((row) => `${row.alias} ${row.body}`), source].filter(Boolean).join("\n");
-      }
-      if (!source) {
-        return ctx.edit({ content: "Von diesem Bot sind hier keine Nachrichten. Schreib zum Beispiel m!play, warte auf seine Antwort, und ruf /eatbot noch einmal auf." });
-      }
-      const rows = eatenLines(source);
-      if (!rows.length) {
-        return ctx.edit({
-          content: source
-            ? "Nachrichten und Embeds gesehen, aber keine Befehle erkannt. Im Embed soll der Feldname der Befehl sein, oder eine Zeile: tide Die Tide dreht."
-            : "Discord gibt die Befehlsliste eines anderen Bots nicht heraus. Seine Hilfe muss in diesem Kanal stehen, oder du fügst sie unter liste ein.",
-        });
-      }
-      for (const row of rows) {
-        putMemory("command", row.key, row.body);
-        saveRepertoire(row.key, botUser.id, botUser.username, row.alias || "");
-      }
-      await refreshSlash();
-      const label = (row) => (row.alias && !row.alias.startsWith("/") ? row.alias : `/${row.key}`);
-      const extra = pages.length > 1 ? ` Offen ist nur eine Seite. Im Menü stehen noch: ${pages.join(", ")}. Jede Seite einmal aufklappen, danach /eatbot wieder.` : "";
-      return ctx.edit({ content: `${rows.length} Funktionen von ${botUser.username} liegen jetzt bei Axi: ${rows.map(label).join(", ")}. ${botUser} selbst bleibt unverändert.${extra}`.slice(0, 1900) });
+      const result = await takeBot(ctx.channel, botUser, ctx.text("liste"));
+      return ctx.edit({ content: result.text });
     }
     case "steuern": {
       const botUser = await resolveBot(ctx);
