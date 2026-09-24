@@ -2,7 +2,7 @@
 
 Das ist die volle Fassung zum Selberhosten. Sie läuft auf deinem Rechner, die Daten bleiben dort. Die Browser-Ansicht ist davon getrennt und wird nicht gebraucht.
 
-Andere Discord-Bots kann Axi nicht fernsteuern. Eigene Antworten legst du mit `/befehl` an und nimmst sie mit `/entfernen` wieder runter.
+`/bots` listet die Bots, die wirklich auf Ataraxia sind. `/adaptieren` übernimmt eine Funktion in Axis Namen, unter dem Namen dieses Bots, mit Verweis auf sein Profil. Axi kann den anderen Bot nicht einloggen oder fernsteuern. `/entfernen` gibt die Funktion wieder ab. `/steuern` zeigt nur, was schon übernommen ist.
 
 ## Start
 

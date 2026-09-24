@@ -1,10 +1,11 @@
-import { ChannelType, PermissionFlagsBits, SlashCommandBuilder } from "discord.js";
+import { SlashCommandBuilder, ChannelType, PermissionFlagsBits } from "discord.js";
 import { askMind, knownModel } from "./ai.js";
 import {
   addReminder,
   addWarn,
   addXp,
   dropMemory,
+  dropRepertoire,
   flag,
   grant,
   granted,
@@ -12,7 +13,9 @@ import {
   memoryRows,
   noteUse,
   putMemory,
+  repertoireRows,
   saveOverwrite,
+  saveRepertoire,
   setSetting,
   setting,
   topMembers,
@@ -20,6 +23,7 @@ import {
   xpOf,
 } from "./db.js";
 import { KEY, cleanKey, infiltration, personalData } from "./guard.js";
+import { register } from "./register.js";
 
 const jokes = [
   "Treffen sich zwei Magnete. Sagt der eine: Was soll ich heute bloß anziehen?",
@@ -115,6 +119,9 @@ export const catalog = [
   ["kanal", "Sehen und Schreiben für einen Kanal", "Server"],
   ["ueberblick", "Name und Beschreibung des Servers", "Server"],
   ["einladen", "Erstellt einen Einladungslink", "Server"],
+  ["bots", "Bots auf diesem Server", "Andere Bots"],
+  ["adaptieren", "Übernimmt eine Funktion eines Bots", "Andere Bots"],
+  ["steuern", "Zeigt, was von einem Bot bei Axi liegt", "Andere Bots"],
   ["modul", "Schaltet ein Modul an oder aus", "Server"],
   ["modell", "Wählt die KI", "Server"],
   ["befehl", "Legt einen eigenen Befehl fest", "Lernen"],
@@ -219,6 +226,14 @@ export function slashCommands() {
         .addStringOption((o) => o.setName("text").setDescription("Kurze Beschreibung"))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
     einladen: (b) => b.setDefaultMemberPermissions(PermissionFlagsBits.CreateInstantInvite),
+    bots: (b) => b,
+    adaptieren: (b) =>
+      b
+        .addUserOption((o) => o.setName("bot").setDescription("Welcher Bot").setRequired(true))
+        .addStringOption((o) => o.setName("befehl").setDescription("Befehlsname").setRequired(true))
+        .addStringOption((o) => o.setName("antwort").setDescription("Was Axi darauf antwortet").setRequired(true))
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+    steuern: (b) => b.addUserOption((o) => o.setName("bot").setDescription("Welcher Bot").setRequired(true)),
     modul: (b) =>
       b
         .addStringOption((o) =>
@@ -274,15 +289,46 @@ export function slashCommands() {
   });
 }
 
+const SLASH_NAME = /^[a-z0-9-]{1,32}$/;
+
+export function allSlashCommands() {
+  const taken = repertoireRows().filter((row) => SLASH_NAME.test(row.trigger) && !catalog.some((item) => item[0] === row.trigger));
+  const extra = taken.map((row) => new SlashCommandBuilder().setName(row.trigger).setDescription(`Von ${row.bot_name}`.slice(0, 100)).toJSON());
+  const seen = new Set();
+  return [...slashCommands(), ...extra].filter((command) => {
+    if (seen.has(command.name)) return false;
+    seen.add(command.name);
+    return true;
+  });
+}
+
+async function refreshSlash() {
+  const token = process.env.DISCORD_TOKEN;
+  const clientId = process.env.DISCORD_CLIENT_ID;
+  const guildId = process.env.DISCORD_GUILD_ID;
+  if (!token || !clientId || !guildId) return;
+  await register(token, clientId, guildId, allSlashCommands());
+}
+
 export function helpText() {
-  const groups = ["Orientierung", "Leute", "Gespräch", "Anliegen", "Moderation", "Server", "Lernen"];
-  return groups
+  const groups = ["Orientierung", "Leute", "Gespräch", "Anliegen", "Moderation", "Server", "Andere Bots", "Lernen"];
+  const owned = new Set(repertoireRows().map((row) => row.trigger));
+  const base = groups
     .map((group) => {
       const rows = catalog.filter((item) => item[2] === group).map(([name, description]) => `/${name} — ${description}`);
-      const own = group === "Lernen" ? memoryRows("command").map((row) => `!${row.item_key} — ${row.body}`) : [];
+      const own = group === "Lernen" ? memoryRows("command").filter((row) => !owned.has(row.item_key)).map((row) => `/${row.item_key} — ${row.body}`) : [];
       return [`**${group}**`, ...rows, ...own].join("\n");
     })
     .join("\n\n");
+  const byBot = new Map();
+  for (const row of repertoireRows()) {
+    const body = memoryRows("command").find((command) => command.item_key === row.trigger)?.body ?? "";
+    const bucket = byBot.get(row.bot_id) ?? { name: row.bot_name, id: row.bot_id, rows: [] };
+    bucket.rows.push(`/${row.trigger} — ${body}`);
+    byBot.set(row.bot_id, bucket);
+  }
+  const blocks = [...byBot.values()].map((bucket) => `**${bucket.name}**\n<@${bucket.id}>\n${bucket.rows.join("\n")}`);
+  return [base, ...blocks].join("\n\n");
 }
 
 export async function runCommand(name, ctx) {
@@ -481,6 +527,39 @@ export async function runCommand(name, ctx) {
       const invite = await ctx.channel.createInvite({ maxAge: 60 * 60 * 24, maxUses: 1, unique: true });
       return ctx.reply({ content: invite.url, ephemeral: true });
     }
+    case "bots": {
+      await ctx.guild.members.fetch();
+      const bots = ctx.guild.members.cache.filter((item) => item.user.bot && item.id !== ctx.client.user.id);
+      if (!bots.size) return ctx.reply({ content: "Keine anderen Bots auf dem Server." });
+      const taken = repertoireRows();
+      const lines = [...bots.values()].map((item) => {
+        const count = taken.filter((row) => row.bot_id === item.id).length;
+        return `${item} · ${count ? `${count} bei Axi` : "noch nichts übernommen"}`;
+      });
+      return ctx.reply({ content: lines.join("\n").slice(0, 1900) });
+    }
+    case "adaptieren": {
+      if (!staff(member, PermissionFlagsBits.ManageGuild)) return ctx.reply({ content: "Dafür fehlt das Recht." });
+      const botUser = ctx.userOf("bot");
+      if (!botUser?.bot || botUser.id === ctx.client.user.id) return ctx.reply({ content: "Nenn einen anderen Bot." });
+      const key = cleanKey(ctx.text("befehl"));
+      const body = ctx.text("antwort").trim().slice(0, 200);
+      if (!KEY.test(key) || catalog.some((item) => item[0] === key)) return ctx.reply({ content: "Der Name geht nicht. 2–16 Buchstaben, kein fester Befehl." });
+      if (!SLASH_NAME.test(key)) return ctx.reply({ content: "Nur Kleinbuchstaben, Zahlen und Bindestrich. So wird es ein Slash-Befehl." });
+      if (!body || personalData(`${key} ${body}`) || infiltration(`${key} ${body}`)) return ctx.reply({ content: "Die Antwort speichere ich nicht." });
+      putMemory("command", key, body);
+      saveRepertoire(key, botUser.id, botUser.username);
+      await refreshSlash();
+      return ctx.reply({ content: `/${key} gehört jetzt Axi, Kategorie ${botUser.username}. ${botUser} führt sie nicht aus.` });
+    }
+    case "steuern": {
+      const botUser = ctx.userOf("bot");
+      if (!botUser) return ctx.reply({ content: "Nenn den Bot." });
+      const rows = repertoireRows().filter((row) => row.bot_id === botUser.id);
+      if (!rows.length) return ctx.reply({ content: `${botUser} kann ich nicht fernsteuern. /adaptieren übernimmt eine Funktion in Axis Repertoire.` });
+      const lines = rows.map((row) => `/${row.trigger}`);
+      return ctx.reply({ content: `${botUser} bleibt selbstständig. Bei Axi liegen: ${lines.join(", ")}.` });
+    }
     case "modul": {
       if (!staff(member, PermissionFlagsBits.ManageGuild)) return ctx.reply({ content: "Dafür fehlt das Recht." });
       setSetting(ctx.text("name"), ctx.text("stand"));
@@ -510,7 +589,9 @@ export async function runCommand(name, ctx) {
       const key = cleanKey(ctx.text("name"));
       if (!KEY.test(key)) return ctx.reply({ content: "Den Befehl gibt es nicht." });
       dropMemory("command", key);
-      return ctx.reply({ content: `!${key} ist aus dem Repertoire.` });
+      dropRepertoire(key);
+      await refreshSlash();
+      return ctx.reply({ content: `/${key} ist aus dem Repertoire.` });
     }
     case "wissen": {
       const lines = [

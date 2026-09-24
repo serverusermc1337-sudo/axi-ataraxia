@@ -1,6 +1,6 @@
 import { Client, Events, GatewayIntentBits } from "discord.js";
 import { askMind } from "./ai.js";
-import { prefixArgs, runCommand, slashCommands } from "./commands.js";
+import { prefixArgs, runCommand, allSlashCommands } from "./commands.js";
 import { addXp, dueReminders, flag, granted, memoryRows, noteUse, setting } from "./db.js";
 import { infiltration } from "./guard.js";
 import { register } from "./register.js";
@@ -30,7 +30,7 @@ const client = new Client({
 });
 
 client.once(Events.ClientReady, async (ready) => {
-  await register(token, clientId, guildId, slashCommands());
+  await register(token, clientId, guildId, allSlashCommands());
   ready.user.setPresence({ activities: [{ name: setting("status", "Ataraxia") }], status: "online" });
   console.log(`Axi ist online als ${ready.user.tag}`);
 });
@@ -168,7 +168,7 @@ function known(name) {
   return [
     "hilfe", "ping", "server", "zeit", "rechnen", "user", "avatar", "level", "rangliste", "umfrage", "erinnerung",
     "wuerfel", "muenze", "achtball", "witz", "ticket", "schliessen", "warn", "verwarnungen", "timeout", "kick", "ban",
-    "clear", "slowmode", "sagen", "sicherheit", "hierarchie", "rolle", "kanal", "ueberblick", "einladen", "modul", "modell",
+    "clear", "slowmode", "sagen", "sicherheit", "hierarchie", "rolle", "kanal", "ueberblick", "einladen", "bots", "adaptieren", "steuern", "modul", "modell",
     "befehl", "entfernen", "wissen", "ki", "anpassen", "optimieren", "regeln", "akzeptieren", "freigabe",
   ].includes(name);
 }

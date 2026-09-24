@@ -52,6 +52,11 @@ db.exec(`
     stand text not null,
     primary key (channel_id, role_key, perm)
   );
+  create table if not exists repertoire (
+    trigger text primary key,
+    bot_id text not null,
+    bot_name text not null
+  );
 `);
 
 const getSetting = db.prepare("select value from settings where key = ?");
@@ -181,4 +186,16 @@ export function saveOverwrite(channelId, roleKey, perm, stand) {
 
 export function listOverwrites(channelId) {
   return db.prepare("select role_key, perm, stand from overwrites where channel_id = ? order by role_key, perm").all(channelId);
+}
+
+export function repertoireRows() {
+  return db.prepare("select trigger, bot_id, bot_name from repertoire order by bot_name, trigger").all();
+}
+
+export function saveRepertoire(trigger, botId, botName) {
+  db.prepare("insert into repertoire (trigger, bot_id, bot_name) values (?, ?, ?) on conflict(trigger) do update set bot_id = excluded.bot_id, bot_name = excluded.bot_name").run(trigger, botId, botName.slice(0, 32));
+}
+
+export function dropRepertoire(trigger) {
+  db.prepare("delete from repertoire where trigger = ?").run(trigger);
 }
