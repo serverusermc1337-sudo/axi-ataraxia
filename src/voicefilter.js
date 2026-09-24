@@ -65,9 +65,14 @@ async function transcript(audio) {
   return (payload?.candidates?.[0]?.content?.parts ?? []).map((part) => part.text ?? "").join(" ");
 }
 
-function muteForFive(member) {
+async function muteForFive(member, channel) {
   clearTimeout(timers.get(member.id));
-  member.voice.setMute(true, "Sprachfilter").catch(() => undefined);
+  try {
+    await member.voice.setMute(true, "Sprachfilter");
+  } catch {
+    return;
+  }
+  await channel?.send({ content: `${member} wurde wegen Beleidigung für 5 Sekunden stummgeschaltet.` }).catch(() => undefined);
   timers.set(
     member.id,
     setTimeout(() => {
@@ -100,7 +105,8 @@ async function hear(connection, guild, userId) {
     const channelId = connection.joinConfig?.channelId;
     if (!member || member.user.bot || member.voice?.channelId !== channelId) return;
     if (!guild.members.me?.permissions.has(PermissionFlagsBits.MuteMembers)) return;
-    muteForFive(member);
+    const channel = guild.channels.cache.get(channelId) ?? (await guild.channels.fetch(channelId).catch(() => null));
+    muteForFive(member, channel);
   } catch (error) {
     console.error(error);
   } finally {
