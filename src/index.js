@@ -1,6 +1,6 @@
 import { Client, Events, GatewayIntentBits } from "discord.js";
 import { askMind } from "./ai.js";
-import { learnReply, prefixArgs, runCommand, allSlashCommands } from "./commands.js";
+import { isStub, learnReply, prefixArgs, runCommand, allSlashCommands } from "./commands.js";
 import { addXp, dueReminders, flag, granted, memoryRows, noteUse, setting } from "./db.js";
 import { infiltration } from "./guard.js";
 import { register } from "./register.js";
@@ -177,7 +177,7 @@ client.on("messageCreate", async (message) => {
   };
   try {
     const result = await runCommand(name, ctx);
-    if (result === null && custom) await message.reply({ content: custom.body });
+    if (result === null && custom && !isStub(custom.body)) await message.reply({ content: custom.body });
   } catch (error) {
     console.error(error);
     await message.reply({ content: "Das hat nicht geklappt." }).catch(() => undefined);

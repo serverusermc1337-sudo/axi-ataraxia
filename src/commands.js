@@ -15,6 +15,7 @@ import {
   noteSeen,
   noteUse,
   putMemory,
+  repertoireByAlias,
   repertoireRows,
   saveOverwrite,
   saveRepertoire,
@@ -116,13 +117,21 @@ function splitToken(token) {
 
 const COMMAND_TOKEN = "(?:\\/[a-z0-9-]{2,32}|[a-z0-9]{0,8}[!?.^~][a-z0-9-]{2,32})";
 
+export function isStub(body) {
+  return /\b(usage|description|syntax|benutzung)\s*:/i.test(body);
+}
+
 function remember(found, token, bodyRaw) {
   const parts = splitToken(token);
   if (!parts) return;
   const body = String(bodyRaw ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
   if (!SLASH_NAME.test(parts.key) || parts.key.length < 2 || catalog.some((item) => item[0] === parts.key)) return;
-  if (body.length < 2 || personalData(`${parts.key} ${body}`) || infiltration(`${parts.key} ${body}`)) return;
-  if (found.some((item) => item.key === parts.key)) return;
+  if (body.length < 2 || isStub(body) || personalData(`${parts.key} ${body}`) || infiltration(`${parts.key} ${body}`)) return;
+  const existing = found.find((item) => item.key === parts.key);
+  if (existing) {
+    if (isStub(existing.body) && !isStub(body)) existing.body = body;
+    return;
+  }
   found.push({ key: parts.key, body, alias: parts.alias });
 }
 
@@ -155,6 +164,10 @@ function eatenLines(text) {
       continue;
     }
     if (pending) {
+      if (isStub(line)) {
+        pending = "";
+        continue;
+      }
       remember(found, pending, line);
       pending = "";
     }
@@ -164,7 +177,7 @@ function eatenLines(text) {
 
 function pushLines(lines, value) {
   for (const raw of normalizeMentions(value).split("\n")) {
-    const clean = raw.replace(/[*_`~>|]/g, "").trim();
+    const clean = raw.replace(/[*_`~|]/g, "").replace(/^>\s?/, "").trim();
     if (clean) lines.push(clean);
   }
 }
@@ -216,7 +229,7 @@ export function callsIn(messages, botId) {
         (other.reference?.messageId === item.id || other.createdTimestamp - item.createdTimestamp < 8_000),
     );
     const body = reply ? replyBody(reply) : "";
-    if (body.length < 2 || personalData(`${token} ${body}`) || infiltration(`${token} ${body}`)) continue;
+    if (body.length < 2 || isStub(body) || personalData(`${token} ${body}`) || infiltration(`${token} ${body}`)) continue;
     lines.push(`${token} ${body}`);
   }
   return lines;
@@ -236,8 +249,10 @@ export async function learnReply(message) {
   const token = CALLED.exec(source?.content?.trim() ?? "")?.[1];
   if (!token) return;
   const body = replyBody(message);
-  if (body.length < 2 || personalData(`${token} ${body}`) || infiltration(`${token} ${body}`)) return;
+  if (body.length < 2 || isStub(body) || personalData(`${token} ${body}`) || infiltration(`${token} ${body}`)) return;
   noteSeen(message.author.id, token, body);
+  const known = repertoireByAlias(token);
+  if (known) putMemory("command", known.trigger, body);
 }
 
 function customReply(name) {
@@ -966,7 +981,7 @@ export async function runCommand(name, ctx) {
     }
     default: {
       const custom = customReply(name);
-      if (custom) return ctx.reply({ content: custom });
+      if (custom && !isStub(custom)) return ctx.reply({ content: custom });
       return null;
     }
   }

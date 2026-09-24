@@ -221,6 +221,10 @@ export function noteSeen(botId, alias, body) {
   ).run(botId, alias.slice(0, 40), body.slice(0, 200), Date.now());
 }
 
+export function repertoireByAlias(alias) {
+  return db.prepare("select trigger, bot_id, bot_name, alias from repertoire where alias = ? collate nocase").get(alias);
+}
+
 export function seenCalls(botId) {
   return db.prepare("select alias, body from seen_calls where bot_id = ? order by alias").all(botId);
 }
