@@ -55,9 +55,15 @@ db.exec(`
   create table if not exists repertoire (
     trigger text primary key,
     bot_id text not null,
-    bot_name text not null
+    bot_name text not null,
+    alias text not null default ''
   );
 `);
+try {
+  db.exec("alter table repertoire add column alias text not null default ''");
+} catch {
+  /* Spalte gibt es schon */
+}
 
 const getSetting = db.prepare("select value from settings where key = ?");
 const putSetting = db.prepare("insert into settings (key, value) values (?, ?) on conflict(key) do update set value = excluded.value");
@@ -189,11 +195,13 @@ export function listOverwrites(channelId) {
 }
 
 export function repertoireRows() {
-  return db.prepare("select trigger, bot_id, bot_name from repertoire order by bot_name, trigger").all();
+  return db.prepare("select trigger, bot_id, bot_name, alias from repertoire order by bot_name, trigger").all();
 }
 
-export function saveRepertoire(trigger, botId, botName) {
-  db.prepare("insert into repertoire (trigger, bot_id, bot_name) values (?, ?, ?) on conflict(trigger) do update set bot_id = excluded.bot_id, bot_name = excluded.bot_name").run(trigger, botId, botName.slice(0, 32));
+export function saveRepertoire(trigger, botId, botName, alias = "") {
+  db.prepare(
+    "insert into repertoire (trigger, bot_id, bot_name, alias) values (?, ?, ?, ?) on conflict(trigger) do update set bot_id = excluded.bot_id, bot_name = excluded.bot_name, alias = excluded.alias",
+  ).run(trigger, botId, botName.slice(0, 32), alias.slice(0, 40));
 }
 
 export function dropRepertoire(trigger) {

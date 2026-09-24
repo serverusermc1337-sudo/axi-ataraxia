@@ -96,29 +96,50 @@ const RULES_TEXT = [
   "Die KI ist davon getrennt. Erst /freigabe schickt Frage und Gedächtnis an xAI in die USA. Ohne Freigabe bleibt /ki aus.",
 ].join("\n");
 
-function remember(found, keyRaw, bodyRaw) {
-  const key = cleanKey(String(keyRaw ?? "").replace(/^[!/]+/, ""));
+function splitToken(token) {
+  const raw = String(token ?? "").trim();
+  const slash = /^\/([a-z0-9-]{2,32})$/i.exec(raw);
+  if (slash) return { key: cleanKey(slash[1]), alias: "" };
+  const prefixed = /^([a-z0-9]{0,8}[!?.^~])([a-z0-9-]{2,32})$/i.exec(raw);
+  if (prefixed) {
+    const mark = prefixed[1].toLowerCase();
+    const name = cleanKey(prefixed[2]);
+    const key = mark.length === 1 ? name : `${cleanKey(mark.replace(/[^a-z0-9]/g, ""))}-${name}`;
+    return { key, alias: `${mark}${name}` };
+  }
+  const bare = /^([a-z0-9-]{2,32})$/i.exec(raw);
+  if (bare) return { key: cleanKey(bare[1]), alias: "" };
+  return null;
+}
+
+const COMMAND_TOKEN = "(?:\\/[a-z0-9-]{2,32}|[a-z0-9]{0,8}[!?.^~][a-z0-9-]{2,32})";
+
+function remember(found, token, bodyRaw) {
+  const parts = splitToken(token);
+  if (!parts) return;
   const body = String(bodyRaw ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
-  if (!SLASH_NAME.test(key) || key.length < 2 || catalog.some((item) => item[0] === key)) return;
-  if (body.length < 2 || personalData(`${key} ${body}`) || infiltration(`${key} ${body}`)) return;
-  if (found.some((item) => item.key === key)) return;
-  found.push({ key, body });
+  if (!SLASH_NAME.test(parts.key) || parts.key.length < 2 || catalog.some((item) => item[0] === parts.key)) return;
+  if (body.length < 2 || personalData(`${parts.key} ${body}`) || infiltration(`${parts.key} ${body}`)) return;
+  if (found.some((item) => item.key === parts.key)) return;
+  found.push({ key: parts.key, body, alias: parts.alias });
 }
 
 function eatenLines(text) {
   const found = [];
   let pending = "";
+  const only = new RegExp(`^(${COMMAND_TOKEN})$`, "i");
+  const withBody = new RegExp(`^(${COMMAND_TOKEN})\\s+(?:[-–:—|]+\\s*)?(.{2,200})$`, "i");
   for (const raw of String(text ?? "").split("\n")) {
-    const line = raw.replace(/[*_`~>|]/g, "").trim();
+    const line = raw.replace(/[*_`>|]/g, "").trim();
     if (!line) continue;
-    const only = /^(?:\/|!)([a-z0-9-]{2,32})$/i.exec(line);
-    if (only) {
-      pending = only[1];
+    const alone = only.exec(line);
+    if (alone) {
+      pending = alone[1];
       continue;
     }
-    const slashBody = /^(?:\/|!)([a-z0-9-]{2,32})\s+(?:[-–:—|]+\s*)?(.{2,200})$/i.exec(line);
-    if (slashBody) {
-      remember(found, slashBody[1], slashBody[2]);
+    const paired = withBody.exec(line);
+    if (paired) {
+      remember(found, paired[1], paired[2]);
       pending = "";
       continue;
     }
@@ -151,8 +172,8 @@ function messageText(message) {
     for (const field of embed.fields ?? []) {
       const name = String(field.name ?? "").replace(/[*_`~>|]/g, "").trim();
       const value = String(field.value ?? "").replace(/[*_`~>|]/g, "").trim();
-      if (/^(?:\/|!)?[a-z0-9-]{2,32}$/i.test(name)) {
-        lines.push(name.startsWith("/") || name.startsWith("!") ? name : `/${name}`);
+      if (/^(?:\/[a-z0-9-]{2,32}|[a-z0-9]{0,8}[!?.^~][a-z0-9-]{2,32})$/i.test(name.replace(/\s/g, ""))) {
+        lines.push(name.replace(/\s/g, ""));
         pushLines(lines, value);
       } else {
         pushLines(lines, name);
@@ -464,7 +485,7 @@ export function helpText() {
   for (const row of repertoireRows()) {
     const body = memoryRows("command").find((command) => command.item_key === row.trigger)?.body ?? "";
     const bucket = byBot.get(row.bot_id) ?? { name: row.bot_name, id: row.bot_id, rows: [] };
-    bucket.rows.push(`/${row.trigger} — ${body}`);
+    bucket.rows.push(`${row.alias || `/${row.trigger}`} — ${body}`);
     byBot.set(row.bot_id, bucket);
   }
   const blocks = [...byBot.values()].map((bucket) => `**${bucket.name}**\n<@${bucket.id}>\n${bucket.rows.join("\n")}`);
@@ -723,11 +744,12 @@ export async function runCommand(name, ctx) {
       }
       for (const row of rows) {
         putMemory("command", row.key, row.body);
-        saveRepertoire(row.key, botUser.id, botUser.username);
+        saveRepertoire(row.key, botUser.id, botUser.username, row.alias || "");
       }
       await refreshSlash();
+      const label = (row) => (row.alias && !row.alias.startsWith("/") ? row.alias : `/${row.key}`);
       const extra = pages.length > 1 ? ` Offen ist nur eine Seite. Im Menü stehen noch: ${pages.join(", ")}. Jede Seite einmal aufklappen, danach /eatbot wieder.` : "";
-      return ctx.reply({ content: `${rows.length} Funktionen von ${botUser.username} liegen jetzt bei Axi: ${rows.map((row) => `/${row.key}`).join(", ")}. ${botUser} selbst bleibt unverändert.${extra}`.slice(0, 1900) });
+      return ctx.reply({ content: `${rows.length} Funktionen von ${botUser.username} liegen jetzt bei Axi: ${rows.map(label).join(", ")}. ${botUser} selbst bleibt unverändert.${extra}`.slice(0, 1900) });
     }
     case "steuern": {
       const botUser = await resolveBot(ctx);
@@ -873,7 +895,13 @@ export async function runCommand(name, ctx) {
 }
 
 export function prefixArgs(content) {
-  const match = /^!([a-z0-9äöüß]{2,16})(?:\s+([\s\S]*))?$/i.exec(content.trim());
+  const text = content.trim();
+  const aliases = repertoireRows()
+    .filter((row) => row.alias && !row.alias.startsWith("/"))
+    .sort((a, b) => b.alias.length - a.alias.length);
+  const hit = aliases.find((row) => text.toLowerCase() === row.alias.toLowerCase() || text.toLowerCase().startsWith(`${row.alias.toLowerCase()} `));
+  if (hit) return { name: hit.trigger, rest: text.slice(hit.alias.length).trim() };
+  const match = /^!([a-z0-9äöüß]{2,16})(?:\s+([\s\S]*))?$/i.exec(text);
   if (!match) return null;
   return { name: cleanKey(match[1]), rest: (match[2] ?? "").trim() };
 }
