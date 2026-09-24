@@ -57,11 +57,30 @@ function advance(guildId) {
   state.player.play(createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw }));
 }
 
+async function resolveTrack(raw) {
+  const direct = playable(raw);
+  if (direct) return { url: direct, label: direct };
+  const query = String(raw ?? "").trim().slice(0, 120);
+  if (query.length < 2) return null;
+  const search = new URL("https://discoveryprovider.audius.co/v1/tracks/search");
+  search.searchParams.set("query", query);
+  search.searchParams.set("app_name", "axi");
+  const response = await fetch(search, { signal: AbortSignal.timeout(8000) }).catch(() => null);
+  if (!response?.ok) return null;
+  const payload = await response.json().catch(() => null);
+  const track = payload?.data?.find((item) => item?.id && !item.is_delete);
+  if (!track) return null;
+  return {
+    url: `https://discoveryprovider.audius.co/v1/tracks/${track.id}/stream?app_name=axi`,
+    label: `${track.title} — ${track.user?.name ?? "Audius"}`,
+  };
+}
+
 export async function enqueue(member, raw) {
   const channel = member?.voice?.channel;
   if (!channel) return "Du musst in einem Sprachkanal sein.";
-  const link = playable(raw);
-  if (!link) return "Nur eine direkte http- oder https-Adresse. YouTube, Spotify und Apple Music spielt Axi nicht ab, auch nicht mit einem Login.";
+  const found = await resolveTrack(raw);
+  if (!found) return "Dazu gibt es keine frei spielbare Aufnahme. YouTube, Spotify und Apple Music durchsucht Axi nicht.";
   const state = room(member.guild);
   const same = state.connection?.joinConfig?.channelId === channel.id;
   if (!same) {
@@ -81,9 +100,9 @@ export async function enqueue(member, raw) {
       return "Axi kommt nicht in den Sprachkanal. Er braucht dort Verbinden und Sprechen.";
     }
   }
-  state.queue.push({ url: link });
+  state.queue.push(found);
   if (state.player.state.status === AudioPlayerStatus.Idle && !state.current) advance(member.guild.id);
-  return state.current?.url === link ? `Spielt: ${link}` : `In der Warteschlange: ${link}`;
+  return state.current?.url === found.url ? `Spielt: ${found.label}` : `In der Warteschlange: ${found.label}`;
 }
 
 export function skip(guild) {
@@ -107,6 +126,6 @@ export function leave(guild) {
 export function queueText(guild) {
   const state = rooms.get(guild.id);
   if (!state?.current) return "Es läuft nichts.";
-  const lines = [`Jetzt: ${state.current.url}`, ...state.queue.map((item, index) => `${index + 1}. ${item.url}`)];
+  const lines = [`Jetzt: ${state.current.label ?? state.current.url}`, ...state.queue.map((item, index) => `${index + 1}. ${item.label ?? item.url}`)];
   return lines.join("\n").slice(0, 1900);
 }
