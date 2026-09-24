@@ -663,8 +663,10 @@ export async function runCommand(name, ctx) {
     }
     case "muenze":
       return ctx.reply({ content: Math.random() < 0.5 ? "Kopf." : "Zahl." });
-    case "play":
-      return ctx.reply({ content: await enqueue(member, ctx.text("adresse")) });
+    case "play": {
+      await ctx.defer();
+      return ctx.edit({ content: await enqueue(member, ctx.text("adresse")) });
+    }
     case "skip":
       return ctx.reply({ content: skip(ctx.guild) });
     case "stop":
@@ -672,8 +674,10 @@ export async function runCommand(name, ctx) {
     case "warteschlange":
     case "aktuell":
       return ctx.reply({ content: queueText(ctx.guild) });
-    case "radio":
-      return ctx.reply({ content: await tune(member, ctx.text("sender")) });
+    case "radio": {
+      await ctx.defer();
+      return ctx.edit({ content: await tune(member, ctx.text("sender")) });
+    }
     case "achtball":
       return ctx.reply({ content: eight[Math.floor(Math.random() * eight.length)] });
     case "witz":
