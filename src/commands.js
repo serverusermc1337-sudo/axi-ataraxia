@@ -1,6 +1,6 @@
 import { SlashCommandBuilder, ChannelType, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 import { askMind, knownModel } from "./ai.js";
-import { enqueue, leave, queueText, skip, tune, currentVoice } from "./music.js";
+import { enqueue, joinVoice, leave, queueText, skip, tune, currentVoice } from "./music.js";
 import { armVoiceFilter } from "./voicefilter.js";
 import {
   addReminder,
@@ -315,6 +315,7 @@ export const catalog = [
   ["achtball", "Eine trockene Antwort", "Gespräch"],
   ["witz", "Ein kurzer Witz", "Gespräch"],
   ["play", "Spielt einen Titel oder eine direkte Audio-Adresse", "Musik"],
+  ["join", "Kommt in deinen Sprachkanal", "Musik"],
   ["skip", "Überspringt den aktuellen Titel", "Musik"],
   ["stop", "Verlässt den Sprachkanal", "Musik"],
   ["warteschlange", "Zeigt, was noch läuft", "Musik"],
@@ -380,6 +381,7 @@ export function slashCommands() {
     wuerfel: (b) => b.addIntegerOption((o) => o.setName("seiten").setDescription("Standard 6").setMinValue(2).setMaxValue(1000)),
     muenze: (b) => b,
     play: (b) => b.addStringOption((o) => o.setName("adresse").setDescription("Songtitel oder direkte Audio-Adresse").setRequired(true)),
+    join: (b) => b,
     skip: (b) => b,
     stop: (b) => b,
     warteschlange: (b) => b,
@@ -778,6 +780,10 @@ export async function runCommand(name, ctx) {
     }
     case "muenze":
       return ctx.reply({ content: Math.random() < 0.5 ? "Kopf." : "Zahl." });
+    case "join": {
+      await ctx.defer();
+      return ctx.edit({ content: await joinVoice(member) });
+    }
     case "play": {
       await ctx.defer();
       return ctx.edit({ content: await enqueue(member, ctx.text("adresse")) });

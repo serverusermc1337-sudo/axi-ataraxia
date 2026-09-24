@@ -104,36 +104,48 @@ async function resolveTrack(raw) {
 const stations = ["1LIVE", "SWR3", "Bayern 3", "Deutschlandfunk", "Fritz", "WDR 2", "BBC Radio 1", "France Inter"];
 const radioServers = ["https://de1.api.radio-browser.info", "https://nl1.api.radio-browser.info", "https://at1.api.radio-browser.info"];
 
-async function playFound(member, found) {
+async function enterChannel(member) {
   const channel = member?.voice?.channel;
   if (!channel) return "Du musst in einem Sprachkanal sein.";
   const state = room(member.guild);
   const same = state.connection?.joinConfig?.channelId === channel.id;
-  if (!same) {
-    state.connection?.destroy();
-    let closed = "";
-    state.connection = joinVoiceChannel({
-      channelId: channel.id,
-      guildId: member.guild.id,
-      adapterCreator: member.guild.voiceAdapterCreator,
-      selfDeaf: false,
-    });
-    state.connection.on("stateChange", (_, next) => {
-      if (next.status === VoiceConnectionStatus.Disconnected) closed = String(next.closeCode ?? next.reason ?? "");
-    });
-    state.connection.subscribe(state.player);
-    try {
-      await entersState(state.connection, VoiceConnectionStatus.Ready, 15_000);
-      armVoiceFilter(state.connection, member.guild);
-    } catch {
-      state.connection.destroy();
-      state.connection = null;
-      console.error(generateDependencyReport());
-      if (closed === "4014") return "Axi darf in diesen Sprachkanal nicht. Kanal bearbeiten, Berechtigungen, Axi: Verbinden und Sprechen erlauben.";
-      if (closed === "4016" || closed === "4022") return "Die Sprachverschlüsselung von Discord hat Axi abgelehnt.";
-      return `Axi kommt nicht in den Sprachkanal${closed ? ` (${closed})` : ""}. Im Kanal bei Axi Verbinden und Sprechen erlauben.`;
-    }
+  if (same) return null;
+  state.connection?.destroy();
+  let closed = "";
+  state.connection = joinVoiceChannel({
+    channelId: channel.id,
+    guildId: member.guild.id,
+    adapterCreator: member.guild.voiceAdapterCreator,
+    selfDeaf: false,
+  });
+  state.connection.on("stateChange", (_, next) => {
+    if (next.status === VoiceConnectionStatus.Disconnected) closed = String(next.closeCode ?? next.reason ?? "");
+  });
+  state.connection.subscribe(state.player);
+  try {
+    await entersState(state.connection, VoiceConnectionStatus.Ready, 15_000);
+    armVoiceFilter(state.connection, member.guild);
+  } catch {
+    state.connection.destroy();
+    state.connection = null;
+    console.error(generateDependencyReport());
+    if (closed === "4014") return "Axi darf in diesen Sprachkanal nicht. Kanal bearbeiten, Berechtigungen, Axi: Verbinden und Sprechen erlauben.";
+    if (closed === "4016" || closed === "4022") return "Die Sprachverschlüsselung von Discord hat Axi abgelehnt.";
+    return `Axi kommt nicht in den Sprachkanal${closed ? ` (${closed})` : ""}. Im Kanal bei Axi Verbinden und Sprechen erlauben.`;
   }
+  return null;
+}
+
+export async function joinVoice(member) {
+  const error = await enterChannel(member);
+  if (error) return error;
+  return `Axi ist in ${member.voice.channel.name}.`;
+}
+
+async function playFound(member, found) {
+  const error = await enterChannel(member);
+  if (error) return error;
+  const state = room(member.guild);
   state.queue.push(found);
   if (state.player.state.status === AudioPlayerStatus.Idle && !state.current) advance(member.guild.id);
   await new Promise((resolve) => setTimeout(resolve, 2000));
