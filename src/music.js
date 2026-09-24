@@ -7,6 +7,7 @@ import {
   createAudioPlayer,
   createAudioResource,
   entersState,
+  generateDependencyReport,
   joinVoiceChannel,
 } from "@discordjs/voice";
 
@@ -86,11 +87,15 @@ async function playFound(member, found) {
   const same = state.connection?.joinConfig?.channelId === channel.id;
   if (!same) {
     state.connection?.destroy();
+    let closed = "";
     state.connection = joinVoiceChannel({
       channelId: channel.id,
       guildId: member.guild.id,
       adapterCreator: member.guild.voiceAdapterCreator,
       selfDeaf: true,
+    });
+    state.connection.on("stateChange", (_, next) => {
+      if (next.status === VoiceConnectionStatus.Disconnected) closed = String(next.closeCode ?? next.reason ?? "");
     });
     state.connection.subscribe(state.player);
     try {
@@ -98,7 +103,10 @@ async function playFound(member, found) {
     } catch {
       state.connection.destroy();
       state.connection = null;
-      return "Axi kommt nicht in den Sprachkanal. Er braucht dort Verbinden und Sprechen.";
+      console.error(generateDependencyReport());
+      if (closed === "4014") return "Axi darf in diesen Sprachkanal nicht. Kanal bearbeiten, Berechtigungen, Axi: Verbinden und Sprechen erlauben.";
+      if (closed === "4016" || closed === "4022") return "Die Sprachverschlüsselung von Discord hat Axi abgelehnt.";
+      return `Axi kommt nicht in den Sprachkanal${closed ? ` (${closed})` : ""}. Im Kanal bei Axi Verbinden und Sprechen erlauben.`;
     }
   }
   state.queue.push(found);
@@ -128,7 +136,7 @@ export async function tune(member, query) {
     url: playable(best.url_resolved || best.url),
     label: `${best.name}${best.country ? ` · ${best.country}` : ""}`,
   });
-  const more = rows.slice(1, 4).map((item) => item.name).filter(Boolean);
+  const more = [...new Set(rows.slice(1).map((item) => item.name).filter((item) => item && item.toLowerCase() !== best.name.toLowerCase()))].slice(0, 3);
   return more.length ? `${text}\nAndere Treffer: ${more.join(", ")}` : text;
 }
 
