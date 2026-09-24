@@ -1,5 +1,6 @@
 import { SlashCommandBuilder, ChannelType, PermissionFlagsBits } from "discord.js";
 import { askMind, knownModel } from "./ai.js";
+import { enqueue, leave, queueText, skip } from "./music.js";
 import {
   addReminder,
   addWarn,
@@ -280,6 +281,11 @@ export const catalog = [
   ["muenze", "Kopf oder Zahl", "Gespräch"],
   ["achtball", "Eine trockene Antwort", "Gespräch"],
   ["witz", "Ein kurzer Witz", "Gespräch"],
+  ["play", "Spielt eine direkte Audio-Adresse im Sprachkanal", "Musik"],
+  ["skip", "Überspringt den aktuellen Titel", "Musik"],
+  ["stop", "Verlässt den Sprachkanal", "Musik"],
+  ["warteschlange", "Zeigt, was noch läuft", "Musik"],
+  ["aktuell", "Zeigt den aktuellen Titel", "Musik"],
   ["ticket", "Öffnet einen privaten Kanal", "Anliegen"],
   ["schliessen", "Schließt dieses Ticket", "Anliegen"],
   ["warn", "Verwarnung", "Moderation"],
@@ -337,6 +343,11 @@ export function slashCommands() {
         .addStringOption((o) => o.setName("text").setDescription("Woran").setRequired(true)),
     wuerfel: (b) => b.addIntegerOption((o) => o.setName("seiten").setDescription("Standard 6").setMinValue(2).setMaxValue(1000)),
     muenze: (b) => b,
+    play: (b) => b.addStringOption((o) => o.setName("adresse").setDescription("Direkte http- oder https-Audioadresse").setRequired(true)),
+    skip: (b) => b,
+    stop: (b) => b,
+    warteschlange: (b) => b,
+    aktuell: (b) => b,
     achtball: (b) => b.addStringOption((o) => o.setName("frage").setDescription("Frage").setRequired(true)),
     witz: (b) => b,
     ticket: (b) => b.addStringOption((o) => o.setName("thema").setDescription("Worum es geht").setRequired(true)),
@@ -549,7 +560,7 @@ function chunks(text) {
 }
 
 export function helpPages(serverName) {
-  const groups = ["Orientierung", "Leute", "Gespräch", "Anliegen", "Moderation", "Server", "Andere Bots", "Lernen"];
+  const groups = ["Orientierung", "Leute", "Gespräch", "Musik", "Anliegen", "Moderation", "Server", "Andere Bots", "Lernen"];
   const owned = new Set(repertoireRows().map((row) => row.trigger));
   const base = groups
     .map((group) => {
@@ -650,6 +661,15 @@ export async function runCommand(name, ctx) {
     }
     case "muenze":
       return ctx.reply({ content: Math.random() < 0.5 ? "Kopf." : "Zahl." });
+    case "play":
+      return ctx.reply({ content: await enqueue(member, ctx.text("adresse")) });
+    case "skip":
+      return ctx.reply({ content: skip(ctx.guild) });
+    case "stop":
+      return ctx.reply({ content: leave(ctx.guild) });
+    case "warteschlange":
+    case "aktuell":
+      return ctx.reply({ content: queueText(ctx.guild) });
     case "achtball":
       return ctx.reply({ content: eight[Math.floor(Math.random() * eight.length)] });
     case "witz":
