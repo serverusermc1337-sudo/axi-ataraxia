@@ -4,6 +4,7 @@ import { prefixArgs, runCommand, allSlashCommands } from "./commands.js";
 import { addXp, dueReminders, flag, granted, memoryRows, noteUse, setting } from "./db.js";
 import { infiltration } from "./guard.js";
 import { register } from "./register.js";
+import { startWeb } from "./web.js";
 
 const token = process.env.DISCORD_TOKEN;
 const clientId = process.env.DISCORD_CLIENT_ID;
@@ -32,6 +33,7 @@ const client = new Client({
 client.once(Events.ClientReady, async (ready) => {
   await register(token, clientId, guildId, allSlashCommands());
   ready.user.setPresence({ activities: [{ name: setting("status", "Ataraxia") }], status: "online" });
+  startWeb();
   console.log(`Axi ist online als ${ready.user.tag}`);
 });
 
@@ -69,13 +71,19 @@ client.on("interactionCreate", async (interaction) => {
 client.on("messageCreate", async (message) => {
   if (message.author.bot || message.guildId !== guildId) return;
   const content = message.content ?? "";
-  if (flag("automod") && /discord\.gg\/|discord\.com\/invite\//i.test(content) && !message.member?.permissions.has("ManageMessages")) {
+  const reason = automodReason(content, message.member);
+  if (reason) {
     await message.delete().catch(() => undefined);
     return;
   }
   const parsed = prefixArgs(content);
   if (!parsed) {
-    if (flag("levels")) addXp(message.author.id, 12);
+    if (flag("levels")) {
+      const xp = addXp(message.author.id, 12);
+      const before = Math.floor((xp - 12) / 100) + 1;
+      const after = Math.floor(xp / 100) + 1;
+      if (after > before) await message.channel.send({ content: `${message.author} ist Level ${after}.` }).catch(() => undefined);
+    }
     return;
   }
   const name = alias[parsed.name] ?? parsed.name;
@@ -164,17 +172,38 @@ async function maybeAdapt(channel) {
   await channel.send({ content: `Ich habe mich angepasst.${extra}`.slice(0, 1900) }).catch(() => undefined);
 }
 
+function automodReason(text, member) {
+  if (!flag("automod")) return null;
+  if (member?.permissions?.has("ManageMessages")) return null;
+  if (/discord\.gg\/|discord\.com\/invite\//i.test(text)) return "Einladung";
+  if (setting("block_links", "aus") === "an" && /https?:\/\/\S+/i.test(text)) return "Link";
+  const letters = text.replace(/[^A-Za-zÄÖÜäöüß]/g, "");
+  const caps = Number(setting("caps", "0")) || 0;
+  if (caps > 0 && letters.length >= 8) {
+    const upper = letters.replace(/[^A-ZÄÖÜ]/g, "").length;
+    if (upper / letters.length >= caps / 100) return "Großschrift";
+  }
+  const lowered = text.toLowerCase();
+  const hit = memoryRows("word").find((row) => {
+    const word = row.item_key.trim().toLowerCase();
+    if (word.length < 2) return false;
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(^|[^\\p{L}])${escaped}([^\\p{L}]|$)`, "iu").test(lowered);
+  });
+  return hit ? "Wortfilter" : null;
+}
+
 function known(name) {
   return [
     "hilfe", "ping", "server", "zeit", "rechnen", "user", "avatar", "level", "rangliste", "umfrage", "erinnerung",
     "wuerfel", "muenze", "achtball", "witz", "ticket", "schliessen", "warn", "verwarnungen", "timeout", "kick", "ban",
-    "clear", "slowmode", "sagen", "sicherheit", "hierarchie", "rolle", "kanal", "ueberblick", "einladen", "bots", "adaptieren", "steuern", "modul", "modell",
-    "befehl", "entfernen", "wissen", "ki", "anpassen", "optimieren", "regeln", "akzeptieren", "freigabe",
+    "clear", "slowmode", "sagen", "sicherheit", "hierarchie", "rolle", "kanal", "ueberblick", "einladen", "bots", "adaptieren", "steuern", "recht", "filter", "willkommen", "status", "log", "modul", "modell",
+    "befehl", "entfernen", "wissen", "ki", "anpassen", "optimieren", "regeln", "akzeptieren", "freigabe", "widerruf",
   ].includes(name);
 }
 
 function gate(name, userId) {
-  const open = new Set(["hilfe", "regeln", "akzeptieren", "freigabe", "sicherheit", "ping"]);
+  const open = new Set(["hilfe", "regeln", "akzeptieren", "freigabe", "sicherheit", "ping", "widerruf"]);
   if (!open.has(name) && !granted(userId, "rules")) return "Erst /regeln lesen und /akzeptieren. Damit liegt die Speicherung auf deinem Server.";
   if (["ki", "anpassen", "optimieren"].includes(name) && !granted(userId, "ai")) return "Die KI ist extra. Erst /freigabe. Texte gehen an xAI in die USA.";
   return null;

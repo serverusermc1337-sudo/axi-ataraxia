@@ -2,7 +2,9 @@
 
 Das ist die volle Fassung zum Selberhosten. Sie läuft auf deinem Rechner, die Daten bleiben dort. Die Browser-Ansicht ist davon getrennt und wird nicht gebraucht.
 
-`/bots` listet die Bots, die wirklich auf Ataraxia sind. `/adaptieren` übernimmt eine Funktion in Axis Namen, unter dem Namen dieses Bots, mit Verweis auf sein Profil. Axi kann den anderen Bot nicht einloggen oder fernsteuern. `/entfernen` gibt die Funktion wieder ab. `/steuern` zeigt nur, was schon übernommen ist.
+`/recht` stellt dieselben Rechte wie die Web-Seite ein: Mod und Mitglied, jeweils Kicken, Sperren, Timeout, Verwarnen, Löschen, Slowmode, Sagen, Module, Einladen, Rollen, andere Bots. Der Eigner darf immer. `/filter` sperrt Wörter, Links und Großschrift. `/willkommen`, `/status` und `/log` stellen Texte und das Mod-Log ein. `/widerruf` löscht die eigenen Level, Verwarnungen und Freigaben.
+
+Die Web-Seite läuft mit, wenn `WEB_PASSWORD` in der `.env` mindestens 8 Zeichen hat. Danach im Browser der VM `http://IP-DER-VM:8787` öffnen. Dort sind Module, Rechte, Texte, Filter und übernommene Funktionen.
 
 ## Start
 

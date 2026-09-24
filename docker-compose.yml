@@ -7,6 +7,9 @@ services:
       - axi-data:/data
     environment:
       DATA_DIR: /data
+      WEB_PORT: "8787"
+    ports:
+      - "8787:8787"
 
 volumes:
   axi-data:

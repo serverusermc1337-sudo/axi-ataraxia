@@ -199,3 +199,9 @@ export function saveRepertoire(trigger, botId, botName) {
 export function dropRepertoire(trigger) {
   db.prepare("delete from repertoire where trigger = ?").run(trigger);
 }
+
+export function forgetUser(userId) {
+  db.prepare("delete from grants where user_id = ?").run(userId);
+  db.prepare("delete from members where user_id = ?").run(userId);
+  db.prepare("delete from consent where user_id = ?").run(userId);
+}

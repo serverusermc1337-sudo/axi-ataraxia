@@ -7,6 +7,7 @@ import {
   dropMemory,
   dropRepertoire,
   flag,
+  forgetUser,
   grant,
   granted,
   listOverwrites,
@@ -22,6 +23,7 @@ import {
   warnsOf,
   xpOf,
 } from "./db.js";
+import { allows, deny, PERM_IDS, setPerm } from "./access.js";
 import { KEY, cleanKey, infiltration, personalData } from "./guard.js";
 import { register } from "./register.js";
 
@@ -57,8 +59,11 @@ function delay(token) {
   return ms;
 }
 
-function staff(member, bit) {
-  return Boolean(member?.permissions?.has(bit));
+async function modLog(guild, text) {
+  const id = setting("log_channel", "");
+  if (!id) return;
+  const channel = await guild.channels.fetch(id).catch(() => null);
+  if (channel?.isTextBased()) await channel.send({ content: text.slice(0, 1800) }).catch(() => undefined);
 }
 
 function hierarchyBlock(guild, actor, target) {
@@ -121,7 +126,13 @@ export const catalog = [
   ["einladen", "Erstellt einen Einladungslink", "Server"],
   ["bots", "Bots auf diesem Server", "Andere Bots"],
   ["adaptieren", "Übernimmt eine Funktion eines Bots", "Andere Bots"],
-  ["steuern", "Zeigt, was von einem Bot bei Axi liegt", "Andere Bots"],
+  ["steuern", "Führt eine übernommene Funktion aus", "Andere Bots"],
+  ["recht", "Schaltet ein Rollenrecht an oder aus", "Server"],
+  ["filter", "Wortfilter, Links und Großschrift", "Server"],
+  ["willkommen", "Text für neue Mitglieder", "Server"],
+  ["status", "Statustext von Axi", "Server"],
+  ["log", "Kanal für das Mod-Log", "Server"],
+  ["widerruf", "Zieht die Einwilligung zurück und löscht eigene Daten", "Lernen"],
   ["modul", "Schaltet ein Modul an oder aus", "Server"],
   ["modell", "Wählt die KI", "Server"],
   ["befehl", "Legt einen eigenen Befehl fest", "Lernen"],
@@ -233,7 +244,44 @@ export function slashCommands() {
         .addStringOption((o) => o.setName("befehl").setDescription("Befehlsname").setRequired(true))
         .addStringOption((o) => o.setName("antwort").setDescription("Was Axi darauf antwortet").setRequired(true))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
-    steuern: (b) => b.addUserOption((o) => o.setName("bot").setDescription("Welcher Bot").setRequired(true)),
+    steuern: (b) =>
+      b
+        .addUserOption((o) => o.setName("bot").setDescription("Welcher Bot").setRequired(true))
+        .addStringOption((o) => o.setName("befehl").setDescription("Übernommene Funktion, sonst nur die Liste")),
+    recht: (b) =>
+      b
+        .addStringOption((o) =>
+          o.setName("rolle").setDescription("mod oder mitglied").setRequired(true).addChoices({ name: "mod", value: "mod" }, { name: "mitglied", value: "member" }),
+        )
+        .addStringOption((o) =>
+          o
+            .setName("recht")
+            .setDescription("Welches Recht")
+            .setRequired(true)
+            .addChoices(...PERM_IDS.map((id) => ({ name: id, value: id }))),
+        )
+        .addStringOption((o) =>
+          o.setName("stand").setDescription("an oder aus").setRequired(true).addChoices({ name: "an", value: "an" }, { name: "aus", value: "aus" }),
+        ),
+    filter: (b) =>
+      b
+        .addStringOption((o) =>
+          o
+            .setName("art")
+            .setDescription("Was der Filter tun soll")
+            .setRequired(true)
+            .addChoices(
+              { name: "wort", value: "wort" },
+              { name: "weg", value: "weg" },
+              { name: "links", value: "links" },
+              { name: "caps", value: "caps" },
+            ),
+        )
+        .addStringOption((o) => o.setName("wert").setDescription("Wort, an/aus oder Prozent")),
+    willkommen: (b) => b.addStringOption((o) => o.setName("text").setDescription("Text, {name} wird ersetzt").setRequired(true)),
+    status: (b) => b.addStringOption((o) => o.setName("text").setDescription("Kurzer Status").setRequired(true)),
+    log: (b) => b.addChannelOption((o) => o.setName("kanal").setDescription("Mod-Log").addChannelTypes(ChannelType.GuildText)),
+    widerruf: (b) => b,
     modul: (b) =>
       b
         .addStringOption((o) =>
@@ -389,7 +437,7 @@ export async function runCommand(name, ctx) {
       const channel = await ctx.guild.channels.create({
         name: `ticket-${ctx.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 40) || "ticket",
         type: ChannelType.GuildText,
-        topic,
+        topic: `axi:${ctx.user.id} ${topic}`,
         permissionOverwrites: [
           { id: ctx.guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
           { id: ctx.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
@@ -401,12 +449,15 @@ export async function runCommand(name, ctx) {
     }
     case "schliessen": {
       if (!ctx.channel.name?.startsWith("ticket-")) return ctx.reply({ content: "Das ist kein Ticket." });
+      const ownerId = /^axi:(\d+)/.exec(ctx.channel.topic ?? "")?.[1];
+      const isMod = member?.roles?.cache?.some((role) => role.name.toLowerCase() === "mod") || member?.id === ctx.guild.ownerId;
+      if (ownerId && ctx.user.id !== ownerId && !isMod) return ctx.reply({ content: "Nur die Person, die es öffnete, oder Mod." });
       await ctx.reply({ content: "Ich mache das Ticket zu." });
       await ctx.channel.delete("Ticket geschlossen");
       return;
     }
     case "warn": {
-      if (!staff(member, PermissionFlagsBits.ModerateMembers)) return ctx.reply({ content: "Dafür fehlt das Recht." });
+      if (!allows(member, "warn")) return ctx.reply({ content: deny("warn") });
       const who = ctx.userOf("mitglied");
       if (!who) return ctx.reply({ content: "Nenn ein Mitglied." });
       const person = await ctx.guild.members.fetch(who.id).catch(() => null);
@@ -414,6 +465,7 @@ export async function runCommand(name, ctx) {
       if (blocked) return ctx.reply({ content: blocked });
       const warns = addWarn(who.id, ctx.text("grund") || "Kein Grund");
       if (warns.length >= 3) await person?.timeout(10 * 60_000, "drei Verwarnungen").catch(() => undefined);
+      await modLog(ctx.guild, `Verwarnung ${who.username} (${warns.length}/3)`);
       return ctx.reply({ content: `${who} verwarnt (${warns.length}/3).` });
     }
     case "verwarnungen": {
@@ -422,7 +474,7 @@ export async function runCommand(name, ctx) {
       return ctx.reply({ content: lines.join("\n") || "Keine Verwarnungen." });
     }
     case "timeout": {
-      if (!staff(member, PermissionFlagsBits.ModerateMembers)) return ctx.reply({ content: "Dafür fehlt das Recht." });
+      if (!allows(member, "timeout")) return ctx.reply({ content: deny("timeout") });
       const picked = ctx.userOf("mitglied");
       if (!picked) return ctx.reply({ content: "Nenn ein Mitglied." });
       const who = await ctx.guild.members.fetch(picked.id);
@@ -430,12 +482,13 @@ export async function runCommand(name, ctx) {
       if (blocked) return ctx.reply({ content: blocked });
       const minutes = ctx.int("minuten");
       await who.timeout(minutes ? minutes * 60_000 : null, ctx.text("grund") || "Timeout");
+      await modLog(ctx.guild, minutes ? `Timeout ${who.user.username} ${minutes} Minuten` : `Timeout aufgehoben ${who.user.username}`);
       return ctx.reply({ content: minutes ? `${who} ist ${minutes} Minuten still.` : `Timeout von ${who} aufgehoben.` });
     }
     case "kick":
     case "ban": {
       const bit = name === "ban" ? PermissionFlagsBits.BanMembers : PermissionFlagsBits.KickMembers;
-      if (!staff(member, bit)) return ctx.reply({ content: "Dafür fehlt das Recht." });
+      if (!allows(member, name)) return ctx.reply({ content: deny(name) });
       const picked = ctx.userOf("mitglied");
       if (!picked) return ctx.reply({ content: "Nenn ein Mitglied." });
       const who = await ctx.guild.members.fetch(picked.id);
@@ -444,22 +497,23 @@ export async function runCommand(name, ctx) {
       const reason = ctx.text("grund") || "Kein Grund";
       if (name === "ban") await who.ban({ reason });
       else await who.kick(reason);
+      await modLog(ctx.guild, `${name} ${who.user.username}: ${reason}`);
       return ctx.reply({ content: name === "ban" ? `${who.user.username} ist gesperrt.` : `${who.user.username} wurde entfernt.` });
     }
     case "clear": {
-      if (!staff(member, PermissionFlagsBits.ManageMessages)) return ctx.reply({ content: "Dafür fehlt das Recht." });
+      if (!allows(member, "clear")) return ctx.reply({ content: deny("clear") });
       const count = Math.min(100, Math.max(2, ctx.int("anzahl") || 2));
       const deleted = await ctx.channel.bulkDelete(count, true);
       return ctx.reply({ content: `${deleted.size} Nachrichten weg.`, ephemeral: true });
     }
     case "slowmode": {
-      if (!staff(member, PermissionFlagsBits.ManageChannels)) return ctx.reply({ content: "Dafür fehlt das Recht." });
+      if (!allows(member, "slowmode")) return ctx.reply({ content: deny("slowmode") });
       const seconds = ctx.int("sekunden") || 0;
       await ctx.channel.setRateLimitPerUser(seconds);
       return ctx.reply({ content: seconds ? `Slowmode ${seconds}s.` : "Slowmode aus." });
     }
     case "sagen": {
-      if (!staff(member, PermissionFlagsBits.ManageMessages)) return ctx.reply({ content: "Dafür fehlt das Recht." });
+      if (!allows(member, "sagen")) return ctx.reply({ content: deny("sagen") });
       const text = ctx.text("text").slice(0, 500);
       if (personalData(text) || infiltration(text)) return ctx.reply({ content: "Den Text sage ich nicht." });
       await ctx.channel.send({ content: text });
@@ -482,7 +536,7 @@ export async function runCommand(name, ctx) {
       return ctx.reply({ content: lines.join("\n") || "Keine Rollen." });
     }
     case "rolle": {
-      if (!staff(member, PermissionFlagsBits.ManageRoles)) return ctx.reply({ content: "Dafür fehlt das Recht." });
+      if (!allows(member, "rollen")) return ctx.reply({ content: deny("rollen") });
       const picked = ctx.userOf("mitglied");
       if (!picked) return ctx.reply({ content: "Nenn ein Mitglied." });
       const who = await ctx.guild.members.fetch(picked.id);
@@ -495,7 +549,7 @@ export async function runCommand(name, ctx) {
       return ctx.reply({ content: ctx.text("stand") === "mod" ? `${who} ist Mod.` : `${who} ist Mitglied.` });
     }
     case "kanal": {
-      if (!staff(member, PermissionFlagsBits.ManageChannels)) return ctx.reply({ content: "Dafür fehlt das Recht." });
+      if (!allows(member, "rollen")) return ctx.reply({ content: deny("rollen") });
       const channel = ctx.channelOf?.("kanal") ?? ctx.channel;
       const ziel = ctx.text("ziel");
       const recht = ctx.text("recht");
@@ -512,7 +566,7 @@ export async function runCommand(name, ctx) {
       return ctx.reply({ content: `${channel} · ${ziel} · ${recht} · ${stand}.` });
     }
     case "ueberblick": {
-      if (!staff(member, PermissionFlagsBits.ManageGuild)) return ctx.reply({ content: "Dafür fehlt das Recht." });
+      if (!allows(member, "modul")) return ctx.reply({ content: deny("modul") });
       const name = ctx.text("name").trim();
       const text = ctx.text("text").trim();
       if (!name && !text) {
@@ -523,7 +577,7 @@ export async function runCommand(name, ctx) {
       return ctx.reply({ content: `**${ctx.guild.name}**\n${setting("about", "Privater Server Ataraxia.")}` });
     }
     case "einladen": {
-      if (!staff(member, PermissionFlagsBits.CreateInstantInvite)) return ctx.reply({ content: "Dafür fehlt das Recht." });
+      if (!allows(member, "einladen")) return ctx.reply({ content: deny("einladen") });
       const invite = await ctx.channel.createInvite({ maxAge: 60 * 60 * 24, maxUses: 1, unique: true });
       return ctx.reply({ content: invite.url, ephemeral: true });
     }
@@ -539,7 +593,7 @@ export async function runCommand(name, ctx) {
       return ctx.reply({ content: lines.join("\n").slice(0, 1900) });
     }
     case "adaptieren": {
-      if (!staff(member, PermissionFlagsBits.ManageGuild)) return ctx.reply({ content: "Dafür fehlt das Recht." });
+      if (!allows(member, "bots")) return ctx.reply({ content: deny("bots") });
       const botUser = ctx.userOf("bot");
       if (!botUser?.bot || botUser.id === ctx.client.user.id) return ctx.reply({ content: "Nenn einen anderen Bot." });
       const key = cleanKey(ctx.text("befehl"));
@@ -556,23 +610,82 @@ export async function runCommand(name, ctx) {
       const botUser = ctx.userOf("bot");
       if (!botUser) return ctx.reply({ content: "Nenn den Bot." });
       const rows = repertoireRows().filter((row) => row.bot_id === botUser.id);
-      if (!rows.length) return ctx.reply({ content: `${botUser} kann ich nicht fernsteuern. /adaptieren übernimmt eine Funktion in Axis Repertoire.` });
-      const lines = rows.map((row) => `/${row.trigger}`);
-      return ctx.reply({ content: `${botUser} bleibt selbstständig. Bei Axi liegen: ${lines.join(", ")}.` });
+      const wanted = cleanKey(ctx.text("befehl"));
+      if (wanted) {
+        const hit = rows.find((row) => row.trigger === wanted);
+        const body = memoryRows("command").find((command) => command.item_key === wanted)?.body;
+        if (!hit || !body) return ctx.reply({ content: `/${wanted} liegt nicht bei Axi für ${botUser}.` });
+        return ctx.reply({ content: body });
+      }
+      if (!rows.length) return ctx.reply({ content: `${botUser} kann ich nicht fernsteuern. /adaptieren übernimmt eine Funktion, /steuern führt sie dann aus.` });
+      return ctx.reply({ content: `${botUser} bleibt selbstständig. Bei Axi liegen: ${rows.map((row) => `/${row.trigger}`).join(", ")}.` });
+    }
+    case "recht": {
+      if (!allows(member, "rollen") && member?.id !== ctx.guild.ownerId) return ctx.reply({ content: deny("rollen") });
+      const role = ctx.text("rolle") === "mod" ? "mod" : "member";
+      const perm = ctx.text("recht");
+      if (!setPerm(role, perm, ctx.text("stand") === "an")) return ctx.reply({ content: "Das Recht gibt es nicht." });
+      return ctx.reply({ content: `${role === "mod" ? "Mod" : "Mitglied"} · ${perm} ist ${ctx.text("stand")}.` });
+    }
+    case "filter": {
+      if (!allows(member, "modul")) return ctx.reply({ content: deny("modul") });
+      const art = ctx.text("art");
+      const wert = ctx.text("wert").trim().toLowerCase();
+      if (art === "links") {
+        setSetting("block_links", wert === "aus" ? "aus" : "an");
+        return ctx.reply({ content: `Links sind ${wert === "aus" ? "aus" : "an"}.` });
+      }
+      if (art === "caps") {
+        const percent = Math.max(0, Math.min(100, Number(wert) || 0));
+        setSetting("caps", String(percent));
+        return ctx.reply({ content: percent ? `Großschrift ab ${percent} Prozent.` : "Großschrift-Filter aus." });
+      }
+      const key = cleanKey(wert);
+      if (!KEY.test(key)) return ctx.reply({ content: "Wort: 2–16 Buchstaben." });
+      if (art === "weg") {
+        dropMemory("word", key);
+        return ctx.reply({ content: `${key} ist aus dem Filter.` });
+      }
+      putMemory("word", key, key);
+      return ctx.reply({ content: `${key} steht im Filter.` });
+    }
+    case "willkommen": {
+      if (!allows(member, "modul")) return ctx.reply({ content: deny("modul") });
+      const text = ctx.text("text").trim().slice(0, 240);
+      if (personalData(text)) return ctx.reply({ content: "Keine E-Mails oder Nummern." });
+      putMemory("welcome", "text", text);
+      return ctx.reply({ content: "Willkommenstext gespeichert. {name} wird ersetzt." });
+    }
+    case "status": {
+      if (!allows(member, "modul")) return ctx.reply({ content: deny("modul") });
+      const text = ctx.text("text").trim().slice(0, 60);
+      setSetting("status", text);
+      await ctx.client.user.setPresence({ activities: [{ name: text }], status: "online" });
+      return ctx.reply({ content: `Status: ${text}` });
+    }
+    case "log": {
+      if (!allows(member, "modul")) return ctx.reply({ content: deny("modul") });
+      const channel = ctx.channelOf?.("kanal") ?? ctx.channel;
+      setSetting("log_channel", channel.id);
+      return ctx.reply({ content: `Mod-Log ist ${channel}.` });
+    }
+    case "widerruf": {
+      forgetUser(ctx.user.id);
+      return ctx.reply({ content: "Einwilligung zurückgezogen. Deine Level, Verwarnungen und Freigaben auf diesem Server sind gelöscht. Gemeinsame Befehle bleiben.", ephemeral: true });
     }
     case "modul": {
-      if (!staff(member, PermissionFlagsBits.ManageGuild)) return ctx.reply({ content: "Dafür fehlt das Recht." });
+      if (!allows(member, "modul")) return ctx.reply({ content: deny("modul") });
       setSetting(ctx.text("name"), ctx.text("stand"));
       return ctx.reply({ content: `${ctx.text("name")} ist ${ctx.text("stand")}.` });
     }
     case "modell": {
-      if (!staff(member, PermissionFlagsBits.ManageGuild)) return ctx.reply({ content: "Dafür fehlt das Recht." });
+      if (!allows(member, "modul")) return ctx.reply({ content: deny("modul") });
       const model = knownModel(ctx.text("name"));
       setSetting("model", model);
       return ctx.reply({ content: `KI ist ${model}. /ki, /anpassen und /optimieren nutzen sie.` });
     }
     case "befehl": {
-      if (!staff(member, PermissionFlagsBits.ManageGuild)) return ctx.reply({ content: "Dafür fehlt das Recht." });
+      if (!allows(member, "modul")) return ctx.reply({ content: deny("modul") });
       const key = cleanKey(ctx.text("name"));
       const body = (ctx.text("antwort") ?? "").trim().slice(0, 200);
       if (!KEY.test(key) || catalog.some((item) => item[0] === key)) return ctx.reply({ content: "Der Name geht nicht. 2–16 Buchstaben, kein fester Befehl." });
@@ -585,7 +698,7 @@ export async function runCommand(name, ctx) {
       return ctx.reply({ content: `!${key} gehört jetzt Axi.` });
     }
     case "entfernen": {
-      if (!staff(member, PermissionFlagsBits.ManageGuild)) return ctx.reply({ content: "Dafür fehlt das Recht." });
+      if (!allows(member, "modul")) return ctx.reply({ content: deny("modul") });
       const key = cleanKey(ctx.text("name"));
       if (!KEY.test(key)) return ctx.reply({ content: "Den Befehl gibt es nicht." });
       dropMemory("command", key);
@@ -619,7 +732,7 @@ export async function runCommand(name, ctx) {
     case "anpassen":
     case "optimieren": {
       if (!granted(ctx.user.id, "ai")) return ctx.reply({ content: "Erst /freigabe. Die KI ist freiwillig und geht an xAI in die USA." });
-      if (name === "optimieren" && !staff(member, PermissionFlagsBits.ManageGuild)) return ctx.reply({ content: "Aufräumen darf nur die Serververwaltung." });
+      if (name === "optimieren" && !allows(member, "modul")) return ctx.reply({ content: deny("modul") });
       const prompt = name === "ki" ? ctx.text("wunsch") : "";
       if (name === "ki" && prompt.length < 3) return ctx.reply({ content: "Sag genauer, was ich können soll." });
       await ctx.defer();
