@@ -96,16 +96,9 @@ const RULES_TEXT = [
   "Die KI ist davon getrennt. Erst /freigabe schickt Frage und Gedächtnis an xAI in die USA. Ohne Freigabe bleibt /ki aus.",
 ].join("\n");
 
-function plain(value) {
-  return String(value ?? "")
-    .replace(/[*_`~>|]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function remember(found, keyRaw, bodyRaw) {
-  const key = cleanKey(plain(keyRaw).replace(/^[!/]+/, ""));
-  const body = plain(bodyRaw).slice(0, 200);
+  const key = cleanKey(String(keyRaw ?? "").replace(/^[!/]+/, ""));
+  const body = String(bodyRaw ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
   if (!SLASH_NAME.test(key) || key.length < 2 || catalog.some((item) => item[0] === key)) return;
   if (body.length < 2 || personalData(`${key} ${body}`) || infiltration(`${key} ${body}`)) return;
   if (found.some((item) => item.key === key)) return;
@@ -114,26 +107,72 @@ function remember(found, keyRaw, bodyRaw) {
 
 function eatenLines(text) {
   const found = [];
-  for (const line of String(text ?? "").split("\n")) {
-    const clean = plain(line);
-    const match = /^(?:\/|!)?([a-z0-9-]{2,32})\s*(?:[-–:—|]+|\s)\s*(.{2,200})$/i.exec(clean);
-    if (match) remember(found, match[1], match[2]);
+  let pending = "";
+  for (const raw of String(text ?? "").split("\n")) {
+    const line = raw.replace(/[*_`~>|]/g, "").trim();
+    if (!line) continue;
+    const only = /^(?:\/|!)([a-z0-9-]{2,32})$/i.exec(line);
+    if (only) {
+      pending = only[1];
+      continue;
+    }
+    const slashBody = /^(?:\/|!)([a-z0-9-]{2,32})\s+(?:[-–:—|]+\s*)?(.{2,200})$/i.exec(line);
+    if (slashBody) {
+      remember(found, slashBody[1], slashBody[2]);
+      pending = "";
+      continue;
+    }
+    const bareBody = /^([a-z0-9-]{2,32})\s+(?:[-–:—|]+\s*)?(.{2,200})$/.exec(line);
+    if (bareBody && !pending) {
+      remember(found, bareBody[1], bareBody[2]);
+      continue;
+    }
+    if (pending) {
+      remember(found, pending, line);
+      pending = "";
+    }
   }
   return found.slice(0, 25);
 }
 
+function pushLines(lines, value) {
+  for (const raw of String(value ?? "").split("\n")) {
+    const clean = raw.replace(/[*_`~>|]/g, "").trim();
+    if (clean) lines.push(clean);
+  }
+}
+
 function messageText(message) {
-  const lines = [message.content];
+  const lines = [];
+  pushLines(lines, message.content);
   for (const embed of message.embeds ?? []) {
-    lines.push(embed.title, embed.description, embed.author?.name, embed.footer?.text);
+    pushLines(lines, embed.description);
+    pushLines(lines, embed.footer?.text);
     for (const field of embed.fields ?? []) {
-      const name = plain(field.name).replace(/^[!/]+/, "");
-      const value = plain(field.value);
-      if (/^[a-z0-9-]{2,32}$/i.test(name) && value.length >= 2) lines.push(`${name} ${value}`);
-      else lines.push(`${plain(field.name)} ${value}`);
+      const name = String(field.name ?? "").replace(/[*_`~>|]/g, "").trim();
+      const value = String(field.value ?? "").replace(/[*_`~>|]/g, "").trim();
+      if (/^(?:\/|!)?[a-z0-9-]{2,32}$/i.test(name)) {
+        lines.push(name.startsWith("/") || name.startsWith("!") ? name : `/${name}`);
+        pushLines(lines, value);
+      } else {
+        pushLines(lines, name);
+        pushLines(lines, value);
+      }
     }
   }
-  return lines.filter(Boolean).join("\n");
+  return lines.join("\n");
+}
+
+function menuPages(message) {
+  const pages = [];
+  for (const row of message.components ?? []) {
+    for (const component of row.components ?? []) {
+      for (const option of component.options ?? []) {
+        if (option.label) pages.push(option.label);
+      }
+    }
+  }
+  return pages;
 }
 
 function customReply(name) {
@@ -664,10 +703,12 @@ export async function runCommand(name, ctx) {
       const botUser = await resolveBot(ctx);
       if (!botUser) return ctx.reply({ content: "Nenn einen Bot aus den Vorschlägen." });
       let source = ctx.text("liste").trim();
+      let pages = [];
       if (!source && ctx.channel?.messages) {
         const fetched = await ctx.channel.messages.fetch({ limit: 100 }).catch(() => null);
         const fromBot = [...(fetched?.values() ?? [])].filter((item) => item.author.id === botUser.id);
         source = fromBot.map((item) => messageText(item)).join("\n");
+        pages = [...new Set(fromBot.flatMap((item) => menuPages(item)))];
         if (!fromBot.length) {
           return ctx.reply({ content: "Von diesem Bot sind hier keine Nachrichten, auch keine Embeds. Seine Hilfe muss in diesem Kanal stehen, oder du fügst die Liste ein." });
         }
@@ -685,7 +726,8 @@ export async function runCommand(name, ctx) {
         saveRepertoire(row.key, botUser.id, botUser.username);
       }
       await refreshSlash();
-      return ctx.reply({ content: `${rows.length} Funktionen von ${botUser.username} liegen jetzt bei Axi: ${rows.map((row) => `/${row.key}`).join(", ")}. ${botUser} selbst bleibt unverändert.` });
+      const extra = pages.length > 1 ? ` Offen ist nur eine Seite. Im Menü stehen noch: ${pages.join(", ")}. Jede Seite einmal aufklappen, danach /eatbot wieder.` : "";
+      return ctx.reply({ content: `${rows.length} Funktionen von ${botUser.username} liegen jetzt bei Axi: ${rows.map((row) => `/${row.key}`).join(", ")}. ${botUser} selbst bleibt unverändert.${extra}`.slice(0, 1900) });
     }
     case "steuern": {
       const botUser = await resolveBot(ctx);
