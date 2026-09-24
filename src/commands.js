@@ -1,6 +1,7 @@
 import { SlashCommandBuilder, ChannelType, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 import { askMind, knownModel } from "./ai.js";
-import { enqueue, leave, queueText, skip, tune } from "./music.js";
+import { enqueue, leave, queueText, skip, tune, currentVoice } from "./music.js";
+import { armVoiceFilter } from "./voicefilter.js";
 import {
   addReminder,
   addWarn,
@@ -344,6 +345,7 @@ export const catalog = [
   ["willkommen", "Text für neue Mitglieder", "Server"],
   ["status", "Statustext von Axi", "Server"],
   ["selfrole", "Rollenknöpfe, nur für Administratoren", "Server"],
+  ["sprachfilter", "Stummschalten für 5 Sekunden bei Beleidigung im Sprachkanal", "Server"],
   ["log", "Kanal für das Mod-Log", "Server"],
   ["widerruf", "Zieht die Einwilligung zurück und löscht eigene Daten", "Lernen"],
   ["modul", "Schaltet ein Modul an oder aus", "Server"],
@@ -514,6 +516,12 @@ export function slashCommands() {
         )
         .addStringOption((o) => o.setName("name").setDescription("Text auf dem Knopf"))
         .addRoleOption((o) => o.setName("rolle").setDescription("Welche Rolle"))
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    sprachfilter: (b) =>
+      b
+        .addStringOption((o) =>
+          o.setName("stand").setDescription("an oder aus").setRequired(true).addChoices({ name: "an", value: "an" }, { name: "aus", value: "aus" }),
+        )
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     log: (b) => b.addChannelOption((o) => o.setName("kanal").setDescription("Mod-Log").addChannelTypes(ChannelType.GuildText)),
     widerruf: (b) => b,
@@ -1052,6 +1060,18 @@ export async function runCommand(name, ctx) {
       putMemory("selfrole", key, JSON.stringify({ roleId: role.id, label }));
       await showSelfroles(ctx.channel);
       return ctx.reply({ content: `Knopf ${label} gibt ${role.name}.`, ephemeral: true });
+    }
+    case "sprachfilter": {
+      if (!isAdmin(member, ctx.guild)) return ctx.reply({ content: "Nur ein Server-Administrator." });
+      const on = ctx.text("stand") === "an";
+      setSetting("voice_filter", on ? "an" : "aus");
+      if (on) armVoiceFilter(currentVoice(ctx.guild), ctx.guild);
+      return ctx.reply({
+        content: on
+          ? "Sprachfilter ist an. Nur im Kanal, in dem Axi gerade ist. Eine Beleidigung macht 5 Sekunden stumm. Die Aufnahme wird nicht gespeichert. Axi braucht Mitglieder stummschalten und GEMINI_API_KEY."
+          : "Sprachfilter ist aus.",
+        ephemeral: true,
+      });
     }
     case "log": {
       if (!allows(member, "modul")) return ctx.reply({ content: deny("modul") });

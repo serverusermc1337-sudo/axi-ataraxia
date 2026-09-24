@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { ActivityType } from "discord.js";
-import { setting } from "./db.js";
+import { armVoiceFilter } from "./voicefilter.js";
 import {
   AudioPlayerStatus,
   NoSubscriberBehavior,
@@ -27,6 +27,10 @@ function showStatus(label) {
   if (result?.catch) result.catch(() => undefined);
 }
 const blocked = /(^|\.)(youtube\.com|youtu\.be|googlevideo\.com|spotify\.com|scdn\.co|music\.apple\.com|apple\.com|deezer\.com|dzcdn\.net|soundcloud\.com|sndcdn\.com|tidal\.com|music\.amazon\..*|tiktok\.com)$/i;
+
+export function currentVoice(guild) {
+  return rooms.get(guild.id)?.connection ?? null;
+}
 
 export function playable(raw) {
   let url;
@@ -120,6 +124,7 @@ async function playFound(member, found) {
     state.connection.subscribe(state.player);
     try {
       await entersState(state.connection, VoiceConnectionStatus.Ready, 15_000);
+      armVoiceFilter(state.connection, member.guild);
     } catch {
       state.connection.destroy();
       state.connection = null;
