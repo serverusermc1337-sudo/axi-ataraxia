@@ -10,7 +10,8 @@ const prism = require("prism-media");
 const armed = new WeakSet();
 const busy = new Set();
 const timers = new Map();
-const insults = ["arschloch", "hurensohn", "fotze", "wichser", "missgeburt", "schlampe", "nutte", "ficker", "bastard", "idiot"];
+const told = new WeakSet();
+const insults = ["arschloch", "hurensohn", "fotze", "wichser", "missgeburt", "schlampe", "nutte", "ficker", "bastard", "idiot", "fresse", "spasti", "behinder"];
 
 function insulted(text) {
   const lowered = text.toLowerCase();
@@ -52,15 +53,21 @@ async function transcript(audio) {
         {
           role: "user",
           parts: [
-            { text: "Schreibe nur den gesprochenen Wortlaut. Wenn nichts zu verstehen ist, schreibe -." },
+            { text: "Enthält die Aufnahme eine Beleidigung oder Beschimpfung? Antworte nur mit ja oder nein, dann einen Strich und den Wortlaut." },
             { inlineData: { mimeType: "audio/wav", data: audio.toString("base64") } },
           ],
         },
       ],
     }),
-    signal: AbortSignal.timeout(12000),
-  }).catch(() => null);
-  if (!response?.ok) return "";
+    signal: AbortSignal.timeout(15000),
+  }).catch((error) => {
+    console.error(error);
+    return null;
+  });
+  if (!response?.ok) {
+    console.error("sprachfilter", response?.status);
+    return "";
+  }
   const payload = await response.json().catch(() => null);
   return (payload?.candidates?.[0]?.content?.parts ?? []).map((part) => part.text ?? "").join(" ");
 }
@@ -86,26 +93,38 @@ async function hear(connection, guild, userId) {
   if (setting("voice_filter", "aus") !== "an" || busy.has(userId) || userId === guild.client.user?.id) return;
   busy.add(userId);
   try {
-    const opus = connection.receiver.subscribe(userId, { end: { behavior: EndBehaviorType.AfterSilence, duration: 600 } });
+    const opus = connection.receiver.subscribe(userId, { end: { behavior: EndBehaviorType.AfterSilence, duration: 900 } });
     const decoder = new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 });
     const chunks = [];
     let size = 0;
     decoder.on("data", (chunk) => {
-      if (size > 48000 * 4 * 6) return;
+      if (size > 48000 * 4 * 8) return;
       chunks.push(chunk);
       size += chunk.length;
     });
     opus.pipe(decoder);
-    await once(opus, "end").catch(() => undefined);
+    await Promise.race([once(opus, "end"), new Promise((resolve) => setTimeout(resolve, 4000))]);
+    opus.destroy();
     decoder.end();
-    if (size < 48000) return;
-    const text = await transcript(wav(Buffer.concat(chunks)));
-    if (!text || text.trim() === "-" || !insulted(text)) return;
-    const member = await guild.members.fetch(userId).catch(() => null);
+    await once(decoder, "finish").catch(() => undefined);
     const channelId = connection.joinConfig?.channelId;
-    if (!member || member.user.bot || member.voice?.channelId !== channelId) return;
-    if (!guild.members.me?.permissions.has(PermissionFlagsBits.MuteMembers)) return;
     const channel = guild.channels.cache.get(channelId) ?? (await guild.channels.fetch(channelId).catch(() => null));
+    if (size < 8000) {
+      if (!told.has(connection)) {
+        told.add(connection);
+        await channel?.send({ content: "Sprachfilter ist an, hört aber noch keine Sprache. Sprich direkt ins Mikrofon, nicht nur über den Lautsprecher." }).catch(() => undefined);
+      }
+      return;
+    }
+    const text = await transcript(wav(Buffer.concat(chunks)));
+    const rude = /^ja\b/i.test(text.trim()) || insulted(text);
+    if (!rude) return;
+    const member = await guild.members.fetch(userId).catch(() => null);
+    if (!member || member.user.bot || member.voice?.channelId !== channelId) return;
+    if (!guild.members.me?.permissions.has(PermissionFlagsBits.MuteMembers)) {
+      await channel?.send({ content: "Axi darf niemanden stummschalten. Recht: Mitglieder stummschalten." }).catch(() => undefined);
+      return;
+    }
     muteForFive(member, channel);
   } catch (error) {
     console.error(error);

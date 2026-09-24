@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { ActivityType } from "discord.js";
+import { setting } from "./db.js";
 import { armVoiceFilter } from "./voicefilter.js";
 import {
   AudioPlayerStatus,
@@ -109,7 +110,10 @@ async function enterChannel(member) {
   if (!channel) return "Du musst in einem Sprachkanal sein.";
   const state = room(member.guild);
   const same = state.connection?.joinConfig?.channelId === channel.id;
-  if (same) return null;
+  if (same) {
+    armVoiceFilter(state.connection, member.guild);
+    return null;
+  }
   state.connection?.destroy();
   let closed = "";
   state.connection = joinVoiceChannel({
@@ -125,6 +129,10 @@ async function enterChannel(member) {
   try {
     await entersState(state.connection, VoiceConnectionStatus.Ready, 15_000);
     armVoiceFilter(state.connection, member.guild);
+    if (setting("voice_filter", "aus") === "an" && state.player.state.status === AudioPlayerStatus.Idle) {
+      const silence = spawn("ffmpeg", ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "1", "-c:a", "libopus", "-f", "ogg", "pipe:1"], { stdio: ["ignore", "pipe", "ignore"] });
+      state.player.play(createAudioResource(silence.stdout, { inputType: StreamType.OggOpus }));
+    }
   } catch {
     state.connection.destroy();
     state.connection = null;
