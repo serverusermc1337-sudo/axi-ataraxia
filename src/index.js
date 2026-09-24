@@ -4,6 +4,7 @@ import { isStub, learnReply, prefixArgs, runCommand, allSlashCommands } from "./
 import { addXp, dueReminders, flag, granted, memoryRows, noteUse, repertoireByAlias, setting } from "./db.js";
 import { infiltration } from "./guard.js";
 import { register } from "./register.js";
+import { attachPlayback } from "./music.js";
 import { startWeb } from "./web.js";
 
 const token = process.env.DISCORD_TOKEN;
@@ -37,6 +38,7 @@ client.once(Events.ClientReady, async (ready) => {
     console.error(error);
   }
   ready.user.setPresence({ activities: [{ name: setting("status", "Ataraxia") }], status: "online" });
+  attachPlayback(ready);
   startWeb(client);
   console.log(`Axi ist online als ${ready.user.tag}`);
 });

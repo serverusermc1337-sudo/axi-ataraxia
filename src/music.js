@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { ActivityType } from "discord.js";
+import { setting } from "./db.js";
 import {
   AudioPlayerStatus,
   NoSubscriberBehavior,
@@ -12,6 +14,18 @@ import {
 } from "@discordjs/voice";
 
 const rooms = new Map();
+let bot = null;
+
+export function attachPlayback(client) {
+  bot = client;
+}
+
+function showStatus(label) {
+  const name = label ? String(label).slice(0, 128) : setting("status", "Ataraxia").slice(0, 60);
+  const activity = label ? { name, type: ActivityType.Listening } : { name };
+  const result = bot?.user?.setPresence({ activities: [activity], status: "online" });
+  if (result?.catch) result.catch(() => undefined);
+}
 const blocked = /(^|\.)(youtube\.com|youtu\.be|googlevideo\.com|spotify\.com|scdn\.co|music\.apple\.com|apple\.com|deezer\.com|dzcdn\.net|soundcloud\.com|sndcdn\.com|tidal\.com|music\.amazon\..*|tiktok\.com)$/i;
 
 export function playable(raw) {
@@ -48,7 +62,11 @@ function advance(guildId) {
   state.ffmpeg = null;
   const item = state.queue.shift();
   state.current = item ?? null;
-  if (!item) return;
+  if (!item) {
+    showStatus(null);
+    return;
+  }
+  showStatus(item.label ?? item.url);
   const ffmpeg = spawn(
     "ffmpeg",
     ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5", "-user_agent", "axi/1.0", "-i", item.url, "-vn", "-ac", "2", "-ar", "48000", "-c:a", "libopus", "-b:a", "128k", "-f", "ogg", "pipe:1"],
@@ -166,6 +184,7 @@ export function leave(guild) {
   state.ffmpeg?.kill("SIGKILL");
   state.player.stop(true);
   state.connection?.destroy();
+  showStatus(null);
   return "Axi hat den Sprachkanal verlassen.";
 }
 
