@@ -1,0 +1,12 @@
+services:
+  axi:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - axi-data:/data
+    environment:
+      DATA_DIR: /data
+
+volumes:
+  axi-data:
