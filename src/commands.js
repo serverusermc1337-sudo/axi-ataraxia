@@ -249,10 +249,15 @@ export async function learnReply(message) {
   const token = CALLED.exec(source?.content?.trim() ?? "")?.[1];
   if (!token) return;
   const body = replyBody(message);
-  if (body.length < 2 || isStub(body) || personalData(`${token} ${body}`) || infiltration(`${token} ${body}`)) return;
-  noteSeen(message.author.id, token, body);
+  if (body.length >= 2 && !isStub(body) && !personalData(`${token} ${body}`) && !infiltration(`${token} ${body}`)) noteSeen(message.author.id, token, body);
   const known = repertoireByAlias(token);
-  if (known) putMemory("command", known.trigger, body);
+  if (!known || known.bot_id !== message.author.id) return;
+  const embeds = (message.embeds ?? []).map((embed) => embed.toJSON()).slice(0, 10);
+  const text = message.content?.slice(0, 2000) || undefined;
+  const files = [...(message.attachments?.values() ?? [])].slice(0, 10).map((file) => file.url);
+  if (!text && !embeds.length && !files.length) return;
+  await message.channel.send({ content: text, embeds, files, allowedMentions: { parse: [] } });
+  await message.delete().catch(() => undefined);
 }
 
 function customReply(name) {

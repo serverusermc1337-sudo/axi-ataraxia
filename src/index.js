@@ -1,7 +1,7 @@
 import { Client, Events, GatewayIntentBits } from "discord.js";
 import { askMind } from "./ai.js";
 import { isStub, learnReply, prefixArgs, runCommand, allSlashCommands } from "./commands.js";
-import { addXp, dueReminders, flag, granted, memoryRows, noteUse, setting } from "./db.js";
+import { addXp, dueReminders, flag, granted, memoryRows, noteUse, repertoireByAlias, setting } from "./db.js";
 import { infiltration } from "./guard.js";
 import { register } from "./register.js";
 import { startWeb } from "./web.js";
@@ -108,6 +108,8 @@ client.on("messageCreate", async (message) => {
     await message.delete().catch(() => undefined);
     return;
   }
+  const adopted = repertoireByAlias((content.trim().match(/^([a-z0-9]{0,8}[!?.^~][a-z0-9-]{2,32})\b/i) ?? [])[1] ?? "");
+  if (adopted) return;
   const parsed = prefixArgs(content);
   if (!parsed) {
     if (flag("levels")) {
