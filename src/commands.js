@@ -257,8 +257,24 @@ export async function learnReply(message) {
   if (bodySeen.length >= 2 && !isStub(bodySeen)) putMemory("command", known.trigger, bodySeen);
 }
 
+const recentUsers = new Map();
+
+export function noteUserMessage(message) {
+  const list = recentUsers.get(message.channelId) ?? [];
+  list.push({ id: message.id, at: message.createdTimestamp });
+  recentUsers.set(message.channelId, list.filter((item) => message.createdTimestamp - item.at < 15000).slice(-8));
+}
+
+function answersUser(message) {
+  if (message.interaction || message.interactionMetadata) return true;
+  const list = recentUsers.get(message.channelId) ?? [];
+  if (message.reference?.messageId && list.some((item) => item.id === message.reference.messageId)) return true;
+  const last = list.at(-1);
+  return Boolean(last && message.createdTimestamp - last.at < 8000);
+}
+
 export async function replaceBotMessage(message) {
-  if (message.system) return;
+  if (message.system || !answersUser(message)) return;
   const embeds = (message.embeds ?? []).map((embed) => embed.toJSON()).slice(0, 10);
   const text = message.content?.slice(0, 2000) || undefined;
   const files = [...(message.attachments?.values() ?? [])].slice(0, 10).map((file) => file.url);

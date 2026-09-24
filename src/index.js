@@ -1,6 +1,6 @@
 import { Client, Events, GatewayIntentBits } from "discord.js";
 import { askMind } from "./ai.js";
-import { isStub, learnReply, prefixArgs, replaceBotMessage, runCommand, allSlashCommands } from "./commands.js";
+import { isStub, learnReply, noteUserMessage, prefixArgs, replaceBotMessage, runCommand, allSlashCommands } from "./commands.js";
 import { addXp, dueReminders, flag, granted, memoryRows, noteUse, repertoireByAlias, setting } from "./db.js";
 import { infiltration } from "./guard.js";
 import { register } from "./register.js";
@@ -108,6 +108,7 @@ client.on("messageCreate", async (message) => {
     return;
   }
   const content = message.content ?? "";
+  noteUserMessage(message);
   const reason = automodReason(content, message.member);
   if (reason) {
     await message.delete().catch(() => undefined);
