@@ -1,43 +1,38 @@
 # Axi für Ataraxia
 
-Das ist der Discord-Bot zum Selberhosten, zum Beispiel auf einem Proxmox-Server. Er läuft dauerhaft, solange der Container läuft. Die Ansicht im Browser ist davon getrennt.
+Das ist die volle Fassung zum Selberhosten. Sie läuft auf deinem Rechner, die Daten bleiben dort. Die Browser-Ansicht ist davon getrennt und wird nicht gebraucht.
 
-Boje, Kaje und Laterne gibt es hier nicht. Das waren Beispiele. Eigene Antworten legst du mit `/befehl` oder `/ki` an. Andere Bots auf dem Server kann Axi nicht fernsteuern und nicht deren Programm übernehmen.
-
-## Was du brauchst
-
-1. Eine Anwendung im [Discord Developer Portal](https://discord.com/developers/applications).
-2. Unter **Bot** einen Token. Schalte **Message Content Intent** und **Server Members Intent** ein.
-3. Die Application ID und die Server-ID von Ataraxia. Die Server-ID siehst du im Discord-Client, wenn der Entwicklermodus an ist.
-4. Docker auf dem Proxmox-Rechner. In einem LXC muss Docker erlaubt sein (Nesting). Eine kleine virtuelle Maschine ist der einfachere Weg.
+Andere Discord-Bots kann Axi nicht fernsteuern. Eigene Antworten legst du mit `/befehl` an und nimmst sie mit `/entfernen` wieder runter.
 
 ## Start
 
 ```bash
+git clone https://github.com/serverusermc1337-sudo/axi-ataraxia.git
+cd axi-ataraxia
 cp .env.example .env
-# Token, Application ID und Server-ID eintragen. XAI_API_KEY nur, wenn /ki laufen soll.
 docker compose up -d --build
-docker compose logs -f
 ```
 
-Axi lädt die Slash-Befehle nur auf die eingetragene Server-ID. Einladung, ohne Administrator-Recht für den ganzen Server:
+In `.env` gehören `DISCORD_TOKEN`, `DISCORD_CLIENT_ID` und `DISCORD_GUILD_ID`. `XAI_API_KEY` nur, wenn die KI laufen soll.
+
+Im [Discord Developer Portal](https://discord.com/developers/applications) unter **Bot** die Intents **Server Members** und **Message Content** einschalten.
+
+Einladung, `DEINE_APPLICATION_ID` ersetzen:
 
 `https://discord.com/oauth2/authorize?client_id=DEINE_APPLICATION_ID&scope=bot%20applications.commands&permissions=1099780156502`
 
-Ersetze `DEINE_APPLICATION_ID`. Die Rechte decken Nachrichten, Kick, Bann, Timeout, Kanäle und Rollen ab.
+## Auf dem Server
 
-## KI
+`/regeln` und `/akzeptieren` gelten vor den übrigen Befehlen. `/freigabe` schaltet die KI extra frei, sie geht an xAI in die USA.
 
-`/ki`, `/anpassen` und das Aufräumen mit `/optimieren` gehen an xAI in die USA. Jede Person muss vorher `/akzeptieren` sagen. Ohne `XAI_API_KEY` bleibt der Rest des Bots nutzbar, nur die KI nicht.
+`/hierarchie` zeigt die Rollen. `/rolle` vergibt die Discord-Rolle **Mod**, die musst du anlegen und unter Axi ziehen. `/kanal` setzt Sehen und Schreiben für alle oder für Mod. `/ueberblick` ändert Name und Beschreibung.
 
-Die Modellwahl steht in der `.env` als `AI_MODEL` (`grok-4.7`, `grok-4.5` oder `grok-4.3`) und lässt sich auf dem Server mit `/modell` ändern.
+`/hilfe` listet den Rest: Moderation, Tickets, Level, Umfragen, `/ki`, `/anpassen`, `/optimieren`.
 
-## Daten
+Neue Fassung holen:
 
-Die Datenbank liegt im Docker-Volume `axi-data` als SQLite-Datei. Befehle, Fakten, Verwarnungen, Level und die KI-Zustimmung stehen dort. Es werden keine E-Mails oder Telefonnummern gespeichert.
-
-## Befehle
-
-Slash-Befehle wie `/hilfe` und dieselben Befehle mit `!`, zum Beispiel `!ping`. Ein unbekanntes `!tide` merkt sich Axi. Beim zweiten Mal kann `/anpassen` daraus einen eigenen Befehl machen, wenn die KI erlaubt ist.
-
-`/optimieren` räumt nur das Gedächtnis auf und ändert nicht, was `/anpassen` aus der Nutzung baut.
+```bash
+cd ~/axi-ataraxia
+git pull
+sudo docker compose up -d --build
+```

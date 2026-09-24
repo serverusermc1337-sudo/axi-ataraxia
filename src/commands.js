@@ -1,16 +1,18 @@
 import { ChannelType, PermissionFlagsBits, SlashCommandBuilder } from "discord.js";
 import { askMind, knownModel } from "./ai.js";
 import {
-  accept,
-  accepted,
   addReminder,
   addWarn,
   addXp,
   dropMemory,
   flag,
+  grant,
+  granted,
+  listOverwrites,
   memoryRows,
   noteUse,
   putMemory,
+  saveOverwrite,
   setSetting,
   setting,
   topMembers,
@@ -55,6 +57,28 @@ function staff(member, bit) {
   return Boolean(member?.permissions?.has(bit));
 }
 
+function hierarchyBlock(guild, actor, target) {
+  const me = guild.members.me;
+  if (!actor || !target) return "Mitglied nicht gefunden.";
+  if (target.id === actor.id) return "Dich selbst nicht.";
+  if (target.id === me?.id) return "Axi nicht.";
+  const owner = guild.ownerId;
+  if (actor.id !== owner && actor.roles.highest.position <= target.roles.highest.position) return "Deine Rolle steht nicht darüber.";
+  if (me && me.roles.highest.position <= target.roles.highest.position) return "Axi steht in der Hierarchie unter dieser Rolle.";
+  return null;
+}
+
+function modRole(guild) {
+  return guild.roles.cache.find((role) => role.name.toLowerCase() === "mod") ?? null;
+}
+
+const RULES_TEXT = [
+  "Axi ist für den privaten Server Ataraxia. Kein Vertrag mit Discord, keine Garantie auf Dauerbetrieb.",
+  "Mit /akzeptieren willigst du in die Speicherung auf diesem Server ein: Befehle, Fakten, Level, Verwarnungen. Keine E-Mails, keine Telefonnummern.",
+  "Rechtsgrundlage ist deine Einwilligung. Eine ladungsfähige Anschrift ist nicht hinterlegt. Das ist keine anwaltliche Prüfung.",
+  "Die KI ist davon getrennt. Erst /freigabe schickt Frage und Gedächtnis an xAI in die USA. Ohne Freigabe bleibt /ki aus.",
+].join("\n");
+
 function customReply(name) {
   return memoryRows("command").find((row) => row.item_key === name)?.body ?? null;
 }
@@ -86,14 +110,22 @@ export const catalog = [
   ["slowmode", "Pause zwischen Nachrichten", "Moderation"],
   ["sagen", "Axi sagt den Text", "Moderation"],
   ["sicherheit", "Rechte und Grenzen von Axi", "Server"],
+  ["hierarchie", "Rollen von oben nach unten", "Server"],
+  ["rolle", "Setzt Mitglied oder Mod", "Server"],
+  ["kanal", "Sehen und Schreiben für einen Kanal", "Server"],
+  ["ueberblick", "Name und Beschreibung des Servers", "Server"],
+  ["einladen", "Erstellt einen Einladungslink", "Server"],
   ["modul", "Schaltet ein Modul an oder aus", "Server"],
   ["modell", "Wählt die KI", "Server"],
   ["befehl", "Legt einen eigenen Befehl fest", "Lernen"],
+  ["entfernen", "Nimmt einen eigenen Befehl wieder runter", "Lernen"],
   ["wissen", "Zeigt das Gedächtnis", "Lernen"],
   ["ki", "Antwortet und speichert ein Feature, wenn es passt", "Lernen"],
   ["anpassen", "Ändert Befehle aus Nutzung und Anfragen", "Lernen"],
   ["optimieren", "Räumt das Gedächtnis auf", "Lernen"],
-  ["akzeptieren", "Erlaubt die KI für dich", "Lernen"],
+  ["regeln", "AGB, Speicherung und Datenschutz", "Lernen"],
+  ["akzeptieren", "Willigt in die Speicherung ein", "Lernen"],
+  ["freigabe", "Erlaubt die KI extra", "Lernen"],
 ];
 
 export function slashCommands() {
@@ -153,6 +185,40 @@ export function slashCommands() {
         .addStringOption((o) => o.setName("text").setDescription("Was Axi sagen soll").setRequired(true))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
     sicherheit: (b) => b,
+    hierarchie: (b) => b,
+    rolle: (b) =>
+      b
+        .addUserOption((o) => o.setName("mitglied").setDescription("Wer").setRequired(true))
+        .addStringOption((o) =>
+          o
+            .setName("stand")
+            .setDescription("mod oder mitglied")
+            .setRequired(true)
+            .addChoices({ name: "mod", value: "mod" }, { name: "mitglied", value: "mitglied" }),
+        )
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
+    kanal: (b) =>
+      b
+        .addChannelOption((o) => o.setName("kanal").setDescription("Welcher Kanal").addChannelTypes(ChannelType.GuildText))
+        .addStringOption((o) =>
+          o.setName("ziel").setDescription("Für wen").addChoices({ name: "alle", value: "alle" }, { name: "mod", value: "mod" }),
+        )
+        .addStringOption((o) =>
+          o.setName("recht").setDescription("sehen oder schreiben").addChoices({ name: "sehen", value: "sehen" }, { name: "schreiben", value: "schreiben" }),
+        )
+        .addStringOption((o) =>
+          o
+            .setName("stand")
+            .setDescription("an, aus oder erben")
+            .addChoices({ name: "an", value: "an" }, { name: "aus", value: "aus" }, { name: "erben", value: "erben" }),
+        )
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+    ueberblick: (b) =>
+      b
+        .addStringOption((o) => o.setName("name").setDescription("Neuer Servername"))
+        .addStringOption((o) => o.setName("text").setDescription("Kurze Beschreibung"))
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+    einladen: (b) => b.setDefaultMemberPermissions(PermissionFlagsBits.CreateInstantInvite),
     modul: (b) =>
       b
         .addStringOption((o) =>
@@ -190,11 +256,17 @@ export function slashCommands() {
         .addStringOption((o) => o.setName("name").setDescription("Befehlsname, ohne Zeichen").setRequired(true))
         .addStringOption((o) => o.setName("antwort").setDescription("Leer löscht den Befehl"))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+    entfernen: (b) =>
+      b
+        .addStringOption((o) => o.setName("name").setDescription("Welcher eigene Befehl").setRequired(true))
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
     wissen: (b) => b,
     ki: (b) => b.addStringOption((o) => o.setName("wunsch").setDescription("Was Axi können oder wissen soll").setRequired(true)),
     anpassen: (b) => b,
     optimieren: (b) => b.setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
     akzeptieren: (b) => b,
+    freigabe: (b) => b,
+    regeln: (b) => b,
   };
   return catalog.map(([name, description]) => {
     const builder = new SlashCommandBuilder().setName(name).setDescription(description);
@@ -222,7 +294,7 @@ export async function runCommand(name, ctx) {
     case "ping":
       return ctx.reply({ content: "Pong. Axi ist wach." });
     case "server":
-      return ctx.reply({ content: `**${ctx.guild.name}** · ${ctx.guild.memberCount} Mitglieder · ${setting("status", "hält Ataraxia ruhig")}` });
+      return ctx.reply({ content: `**${ctx.guild.name}** · ${ctx.guild.memberCount} Mitglieder\n${setting("about", setting("status", "Privater Server Ataraxia."))}` });
     case "zeit":
       return ctx.reply({
         content: `In Berlin ist es ${new Intl.DateTimeFormat("de-DE", { timeZone: "Europe/Berlin", weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date())}.`,
@@ -291,11 +363,11 @@ export async function runCommand(name, ctx) {
       if (!staff(member, PermissionFlagsBits.ModerateMembers)) return ctx.reply({ content: "Dafür fehlt das Recht." });
       const who = ctx.userOf("mitglied");
       if (!who) return ctx.reply({ content: "Nenn ein Mitglied." });
+      const person = await ctx.guild.members.fetch(who.id).catch(() => null);
+      const blocked = hierarchyBlock(ctx.guild, member, person);
+      if (blocked) return ctx.reply({ content: blocked });
       const warns = addWarn(who.id, ctx.text("grund") || "Kein Grund");
-      if (warns.length >= 3) {
-        const person = await ctx.guild.members.fetch(who.id).catch(() => null);
-        await person?.timeout(10 * 60_000, "drei Verwarnungen").catch(() => undefined);
-      }
+      if (warns.length >= 3) await person?.timeout(10 * 60_000, "drei Verwarnungen").catch(() => undefined);
       return ctx.reply({ content: `${who} verwarnt (${warns.length}/3).` });
     }
     case "verwarnungen": {
@@ -308,6 +380,8 @@ export async function runCommand(name, ctx) {
       const picked = ctx.userOf("mitglied");
       if (!picked) return ctx.reply({ content: "Nenn ein Mitglied." });
       const who = await ctx.guild.members.fetch(picked.id);
+      const blocked = hierarchyBlock(ctx.guild, member, who);
+      if (blocked) return ctx.reply({ content: blocked });
       const minutes = ctx.int("minuten");
       await who.timeout(minutes ? minutes * 60_000 : null, ctx.text("grund") || "Timeout");
       return ctx.reply({ content: minutes ? `${who} ist ${minutes} Minuten still.` : `Timeout von ${who} aufgehoben.` });
@@ -319,6 +393,8 @@ export async function runCommand(name, ctx) {
       const picked = ctx.userOf("mitglied");
       if (!picked) return ctx.reply({ content: "Nenn ein Mitglied." });
       const who = await ctx.guild.members.fetch(picked.id);
+      const blocked = hierarchyBlock(ctx.guild, member, who);
+      if (blocked) return ctx.reply({ content: blocked });
       const reason = ctx.text("grund") || "Kein Grund";
       if (name === "ban") await who.ban({ reason });
       else await who.kick(reason);
@@ -346,10 +422,65 @@ export async function runCommand(name, ctx) {
     case "sicherheit":
       return ctx.reply({
         content:
-          "Axi nutzt die Discord-Rechte des Servers. Moderation geht nur, wenn die Rolle das darf und Axi darüber steht.\n" +
-          "Die KI schreibt keinen Code um. E-Mails und Nummern werden nicht gespeichert. Unbekannte !Befehle zählen für /anpassen.\n" +
-          "Andere Bots kann Axi nicht fernsteuern. Eigene Antworten legst du mit /befehl oder /ki an.",
+          "Axi nutzt die Discord-Rollen. Eine Aktion geht nur, wenn du und Axi über der Zielrolle steht.\n" +
+          "/kanal setzt Sehen und Schreiben pro Kanal. /rolle vergibt die Rolle Mod.\n" +
+          "Erst /akzeptieren speichert Daten. Die KI braucht zusätzlich /freigabe und geht an xAI in die USA.\n" +
+          "Axi steuert keine anderen Bots. Eigene Antworten: /befehl und /entfernen.",
       });
+    case "hierarchie": {
+      const lines = [...ctx.guild.roles.cache.values()]
+        .filter((role) => role.id !== ctx.guild.id)
+        .sort((a, b) => b.position - a.position)
+        .slice(0, 30)
+        .map((role, index) => `${index + 1}. ${role.name}`);
+      return ctx.reply({ content: lines.join("\n") || "Keine Rollen." });
+    }
+    case "rolle": {
+      if (!staff(member, PermissionFlagsBits.ManageRoles)) return ctx.reply({ content: "Dafür fehlt das Recht." });
+      const picked = ctx.userOf("mitglied");
+      if (!picked) return ctx.reply({ content: "Nenn ein Mitglied." });
+      const who = await ctx.guild.members.fetch(picked.id);
+      const blocked = hierarchyBlock(ctx.guild, member, who);
+      if (blocked) return ctx.reply({ content: blocked });
+      const role = modRole(ctx.guild);
+      if (!role) return ctx.reply({ content: "Lege in Discord eine Rolle namens Mod an und zieh sie unter Axi." });
+      if (ctx.text("stand") === "mod") await who.roles.add(role);
+      else await who.roles.remove(role);
+      return ctx.reply({ content: ctx.text("stand") === "mod" ? `${who} ist Mod.` : `${who} ist Mitglied.` });
+    }
+    case "kanal": {
+      if (!staff(member, PermissionFlagsBits.ManageChannels)) return ctx.reply({ content: "Dafür fehlt das Recht." });
+      const channel = ctx.channelOf?.("kanal") ?? ctx.channel;
+      const ziel = ctx.text("ziel");
+      const recht = ctx.text("recht");
+      const stand = ctx.text("stand");
+      if (!ziel || !recht || !stand) {
+        const rows = listOverwrites(channel.id).map((row) => `${row.role_key} · ${row.perm} · ${row.stand}`);
+        return ctx.reply({ content: rows.join("\n") || "Keine eigenen Kanalrechte. /kanal mit Ziel, Recht und Stand." });
+      }
+      const role = ziel === "mod" ? modRole(ctx.guild) : ctx.guild.roles.everyone;
+      if (!role) return ctx.reply({ content: "Lege eine Rolle namens Mod an." });
+      const bit = recht === "sehen" ? "ViewChannel" : "SendMessages";
+      await channel.permissionOverwrites.edit(role, { [bit]: stand === "erben" ? null : stand === "an" });
+      saveOverwrite(channel.id, ziel, recht, stand);
+      return ctx.reply({ content: `${channel} · ${ziel} · ${recht} · ${stand}.` });
+    }
+    case "ueberblick": {
+      if (!staff(member, PermissionFlagsBits.ManageGuild)) return ctx.reply({ content: "Dafür fehlt das Recht." });
+      const name = ctx.text("name").trim();
+      const text = ctx.text("text").trim();
+      if (!name && !text) {
+        return ctx.reply({ content: `**${ctx.guild.name}**\n${setting("about", "Privater Server Ataraxia.")}` });
+      }
+      if (name.length >= 2) await ctx.guild.setName(name.slice(0, 100));
+      if (text) setSetting("about", text.slice(0, 240));
+      return ctx.reply({ content: `**${ctx.guild.name}**\n${setting("about", "Privater Server Ataraxia.")}` });
+    }
+    case "einladen": {
+      if (!staff(member, PermissionFlagsBits.CreateInstantInvite)) return ctx.reply({ content: "Dafür fehlt das Recht." });
+      const invite = await ctx.channel.createInvite({ maxAge: 60 * 60 * 24, maxUses: 1, unique: true });
+      return ctx.reply({ content: invite.url, ephemeral: true });
+    }
     case "modul": {
       if (!staff(member, PermissionFlagsBits.ManageGuild)) return ctx.reply({ content: "Dafür fehlt das Recht." });
       setSetting(ctx.text("name"), ctx.text("stand"));
@@ -374,6 +505,13 @@ export async function runCommand(name, ctx) {
       putMemory("command", key, body);
       return ctx.reply({ content: `!${key} gehört jetzt Axi.` });
     }
+    case "entfernen": {
+      if (!staff(member, PermissionFlagsBits.ManageGuild)) return ctx.reply({ content: "Dafür fehlt das Recht." });
+      const key = cleanKey(ctx.text("name"));
+      if (!KEY.test(key)) return ctx.reply({ content: "Den Befehl gibt es nicht." });
+      dropMemory("command", key);
+      return ctx.reply({ content: `!${key} ist aus dem Repertoire.` });
+    }
     case "wissen": {
       const lines = [
         ...memoryRows("command").map((row) => `!${row.item_key} — ${row.body}`),
@@ -382,15 +520,24 @@ export async function runCommand(name, ctx) {
       return ctx.reply({ content: lines.join("\n").slice(0, 1900) || "Noch nichts gelernt." });
     }
     case "akzeptieren":
-      accept(ctx.user.id);
+      grant(ctx.user.id, "rules");
       return ctx.reply({
-        content: "Du erlaubst die KI. Frage und Gedächtnis gehen dann an xAI in die USA. Ohne diesen Schritt bleiben /ki und /anpassen aus.",
+        content: "Speicherung ist erlaubt: Befehle, Fakten, Level, Verwarnungen auf diesem Server. Die KI bleibt aus, bis du /freigabe sagst.",
         ephemeral: true,
       });
+    case "freigabe":
+      if (!granted(ctx.user.id, "rules")) return ctx.reply({ content: "Erst /akzeptieren." });
+      grant(ctx.user.id, "ai");
+      return ctx.reply({
+        content: "KI ist für dich an. Frage und Gedächtnis gehen an xAI in die USA. /ki, /anpassen und /optimieren nutzen das.",
+        ephemeral: true,
+      });
+    case "regeln":
+      return ctx.reply({ content: RULES_TEXT });
     case "ki":
     case "anpassen":
     case "optimieren": {
-      if (!accepted(ctx.user.id)) return ctx.reply({ content: "Erst /akzeptieren. Die KI ist freiwillig und geht an xAI in die USA." });
+      if (!granted(ctx.user.id, "ai")) return ctx.reply({ content: "Erst /freigabe. Die KI ist freiwillig und geht an xAI in die USA." });
       if (name === "optimieren" && !staff(member, PermissionFlagsBits.ManageGuild)) return ctx.reply({ content: "Aufräumen darf nur die Serververwaltung." });
       const prompt = name === "ki" ? ctx.text("wunsch") : "";
       if (name === "ki" && prompt.length < 3) return ctx.reply({ content: "Sag genauer, was ich können soll." });

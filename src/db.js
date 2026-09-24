@@ -39,6 +39,19 @@ db.exec(`
     user_name text not null
   );
   create table if not exists ai_log (at integer not null);
+  create table if not exists grants (
+    user_id text not null,
+    kind text not null,
+    at integer not null,
+    primary key (user_id, kind)
+  );
+  create table if not exists overwrites (
+    channel_id text not null,
+    role_key text not null,
+    perm text not null,
+    stand text not null,
+    primary key (channel_id, role_key, perm)
+  );
 `);
 
 const getSetting = db.prepare("select value from settings where key = ?");
@@ -146,4 +159,26 @@ export function noteAi(at = Date.now()) {
 
 export function aiCount(since) {
   return db.prepare("select count(*) as n from ai_log where at > ?").get(since).n;
+}
+
+export function grant(userId, kind) {
+  db.prepare("insert into grants (user_id, kind, at) values (?, ?, ?) on conflict(user_id, kind) do update set at = excluded.at").run(userId, kind, Date.now());
+}
+
+export function granted(userId, kind) {
+  return Boolean(db.prepare("select 1 as ok from grants where user_id = ? and kind = ?").get(userId, kind));
+}
+
+export function saveOverwrite(channelId, roleKey, perm, stand) {
+  if (stand === "erben") {
+    db.prepare("delete from overwrites where channel_id = ? and role_key = ? and perm = ?").run(channelId, roleKey, perm);
+    return;
+  }
+  db.prepare(
+    "insert into overwrites (channel_id, role_key, perm, stand) values (?, ?, ?, ?) on conflict(channel_id, role_key, perm) do update set stand = excluded.stand",
+  ).run(channelId, roleKey, perm, stand);
+}
+
+export function listOverwrites(channelId) {
+  return db.prepare("select role_key, perm, stand from overwrites where channel_id = ? order by role_key, perm").all(channelId);
 }

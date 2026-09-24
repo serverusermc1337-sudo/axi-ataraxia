@@ -1,7 +1,7 @@
 import { Client, Events, GatewayIntentBits } from "discord.js";
 import { askMind } from "./ai.js";
 import { prefixArgs, runCommand, slashCommands } from "./commands.js";
-import { accepted, addXp, dueReminders, flag, memoryRows, noteUse, setting } from "./db.js";
+import { addXp, dueReminders, flag, granted, memoryRows, noteUse, setting } from "./db.js";
 import { infiltration } from "./guard.js";
 import { register } from "./register.js";
 
@@ -37,6 +37,11 @@ client.once(Events.ClientReady, async (ready) => {
 
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand() || interaction.guildId !== guildId) return;
+  const denied = gate(interaction.commandName, interaction.user.id);
+  if (denied) {
+    await interaction.reply({ content: denied, ephemeral: true });
+    return;
+  }
   const ctx = {
     guild: interaction.guild,
     channel: interaction.channel,
@@ -46,6 +51,7 @@ client.on("interactionCreate", async (interaction) => {
     text: (name) => interaction.options.getString(name) ?? "",
     int: (name) => interaction.options.getInteger(name) ?? 0,
     userOf: (name) => interaction.options.getUser(name),
+    channelOf: (name) => interaction.options.getChannel(name),
     reply: (payload) => interaction.reply(typeof payload === "string" ? { content: payload } : payload),
     defer: () => interaction.deferReply(),
     edit: (payload) => interaction.editReply(typeof payload === "string" ? { content: payload } : payload),
@@ -73,11 +79,16 @@ client.on("messageCreate", async (message) => {
     return;
   }
   const name = alias[parsed.name] ?? parsed.name;
+  const denied = gate(name, message.author.id);
+  if (denied) {
+    await message.reply({ content: denied });
+    return;
+  }
   const custom = memoryRows("command").find((row) => row.item_key === name);
   if (!custom && !known(name)) {
     const hits = noteUse("miss", name, "");
     await message.reply({ content: `!${name} kenne ich nicht. Beim zweiten Mal kann /anpassen daraus einen Befehl machen.` });
-    if (hits >= 2 && accepted(message.author.id) && process.env.XAI_API_KEY) void maybeAdapt(message.channel);
+    if (hits >= 2 && granted(message.author.id, "ai") && process.env.XAI_API_KEY) void maybeAdapt(message.channel);
     return;
   }
   if (infiltration(content)) {
@@ -104,6 +115,7 @@ client.on("messageCreate", async (message) => {
     },
     int: () => number ?? 0,
     userOf: () => message.mentions.users.first() ?? null,
+    channelOf: () => message.mentions.channels.first() ?? message.channel,
     reply: async (payload) => {
       const body = typeof payload === "string" ? { content: payload } : payload;
       if (body.ephemeral) body.ephemeral = undefined;
@@ -156,8 +168,16 @@ function known(name) {
   return [
     "hilfe", "ping", "server", "zeit", "rechnen", "user", "avatar", "level", "rangliste", "umfrage", "erinnerung",
     "wuerfel", "muenze", "achtball", "witz", "ticket", "schliessen", "warn", "verwarnungen", "timeout", "kick", "ban",
-    "clear", "slowmode", "sagen", "sicherheit", "modul", "modell", "befehl", "wissen", "ki", "anpassen", "optimieren", "akzeptieren",
+    "clear", "slowmode", "sagen", "sicherheit", "hierarchie", "rolle", "kanal", "ueberblick", "einladen", "modul", "modell",
+    "befehl", "entfernen", "wissen", "ki", "anpassen", "optimieren", "regeln", "akzeptieren", "freigabe",
   ].includes(name);
+}
+
+function gate(name, userId) {
+  const open = new Set(["hilfe", "regeln", "akzeptieren", "freigabe", "sicherheit", "ping"]);
+  if (!open.has(name) && !granted(userId, "rules")) return "Erst /regeln lesen und /akzeptieren. Damit liegt die Speicherung auf deinem Server.";
+  if (["ki", "anpassen", "optimieren"].includes(name) && !granted(userId, "ai")) return "Die KI ist extra. Erst /freigabe. Texte gehen an xAI in die USA.";
+  return null;
 }
 
 client.login(token);
