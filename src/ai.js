@@ -4,13 +4,23 @@ import { KEY, cleanKey, infiltration, personalData } from "./guard.js";
 const MODELS = new Set(["grok-4.7", "grok-4.5", "grok-4.3"]);
 const HOUR = 12;
 
+export function aiReady() {
+  return Boolean(process.env.GEMINI_API_KEY || process.env.XAI_API_KEY);
+}
+
+function provider() {
+  if (process.env.GEMINI_API_KEY && (!process.env.XAI_API_KEY || process.env.AI_PROVIDER === "gemini")) return "gemini";
+  if (process.env.XAI_API_KEY) return "xai";
+  return "";
+}
+
 export function knownModel(id) {
   return MODELS.has(id) ? id : "grok-4.5";
 }
 
 export async function askMind(mode, prompt) {
-  const key = process.env.XAI_API_KEY;
-  if (!key) return { ok: false, error: "Die KI ist nicht angeschlossen. XAI_API_KEY fehlt auf dem Server." };
+  const which = provider();
+  if (!which) return { ok: false, error: "Die KI ist nicht angeschlossen. GEMINI_API_KEY oder XAI_API_KEY fehlt auf dem Server." };
   if (personalData(prompt)) return { ok: false, error: "E-Mails und Telefonnummern gehen nicht an die KI." };
   if (infiltration(prompt)) return { ok: false, error: "Abgewiesen. Axi lernt keine Angriffe." };
   if (aiCount(Date.now() - 60 * 60 * 1000) >= HOUR) return { ok: false, error: "Axi hat diese Stunde genug gelernt." };
@@ -23,7 +33,7 @@ export async function askMind(mode, prompt) {
   const usage = usageBrief()
     .map((row) => (row.kind === "miss" ? `Unbekannt !${row.item_key} ${row.hits}×` : `Anfrage ${row.hits}×: ${row.sample || row.item_key}`))
     .join("\n");
-  const model = knownModel(setting("model", process.env.AI_MODEL || "grok-4.5"));
+  const model = which === "gemini" ? "gemini-3.8-flash" : knownModel(setting("model", process.env.AI_MODEL || "grok-4.5"));
   const system =
     "Du bist Axi, der Bot des privaten Servers Ataraxia. Antworte nur mit JSON {\"reply\":\"\",\"updates\":[]}. " +
     "reply ist deutsch, kurz, ohne Emoji. updates ändert nur das Gedächtnis, nie Programmcode, Rechte oder Rollen. " +
@@ -43,29 +53,50 @@ export async function askMind(mode, prompt) {
   noteAi();
   let response;
   try {
-    response = await fetch("https://api.x.ai/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        model,
-        temperature: mode === "ask" ? 0.4 : 0.2,
-        max_tokens: 500,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-      }),
-    });
+    response = which === "gemini" ? await askGemini(process.env.GEMINI_API_KEY, model, system, user, mode) : await askGrok(process.env.XAI_API_KEY, model, system, user, mode);
   } catch {
     return { ok: false, error: "Die KI ist nicht erreichbar." };
   }
   if (!response.ok) return { ok: false, error: "Die KI hat abgelehnt." };
-  const payload = await response.json();
-  const text = payload.choices?.[0]?.message?.content ?? "";
-  const parsed = parse(text);
+  const parsed = parse(response.text);
   const learned = apply(parsed.updates, mode === "ask" ? 2 : 4);
   return { ok: true, reply: parsed.reply || "Gemacht.", learned, model };
+}
+
+async function askGrok(key, model, system, user, mode) {
+  const response = await fetch("https://api.x.ai/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      model,
+      temperature: mode === "ask" ? 0.4 : 0.2,
+      max_tokens: 500,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+    }),
+  });
+  if (!response.ok) return { ok: false };
+  const payload = await response.json();
+  return { ok: true, text: payload.choices?.[0]?.message?.content ?? "" };
+}
+
+async function askGemini(key, model, system, user, mode) {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: system }] },
+      contents: [{ role: "user", parts: [{ text: user }] }],
+      generationConfig: { temperature: mode === "ask" ? 0.4 : 0.2, maxOutputTokens: 500, responseMimeType: "application/json" },
+    }),
+  });
+  if (!response.ok) return { ok: false };
+  const payload = await response.json();
+  const text = (payload.candidates?.[0]?.content?.parts ?? []).map((part) => part.text ?? "").join("");
+  return { ok: true, text };
 }
 
 function parse(text) {

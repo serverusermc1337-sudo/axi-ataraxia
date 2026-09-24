@@ -15,7 +15,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-In `.env` gehören `DISCORD_TOKEN`, `DISCORD_CLIENT_ID` und `DISCORD_GUILD_ID`. `XAI_API_KEY` nur, wenn die KI laufen soll.
+In `.env` gehören `DISCORD_TOKEN`, `DISCORD_CLIENT_ID` und `DISCORD_GUILD_ID`. Für die KI `GEMINI_API_KEY` oder `XAI_API_KEY`.
 
 Im [Discord Developer Portal](https://discord.com/developers/applications) unter **Bot** die Intents **Server Members** und **Message Content** einschalten.
 

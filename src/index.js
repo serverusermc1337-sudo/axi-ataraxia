@@ -1,5 +1,5 @@
 import { Client, Events, GatewayIntentBits } from "discord.js";
-import { askMind } from "./ai.js";
+import { askMind, aiReady } from "./ai.js";
 import { isStub, learnReply, noteUserMessage, prefixArgs, replaceBotMessage, runCommand, allSlashCommands } from "./commands.js";
 import { addXp, dueReminders, flag, granted, memoryRows, noteUse, repertoireByAlias, setting } from "./db.js";
 import { infiltration } from "./guard.js";
@@ -136,7 +136,7 @@ client.on("messageCreate", async (message) => {
   if (!custom && !known(name)) {
     const hits = noteUse("miss", name, "");
     await message.reply({ content: `!${name} kenne ich nicht. Beim zweiten Mal kann /anpassen daraus einen Befehl machen.` });
-    if (hits >= 2 && granted(message.author.id, "ai") && process.env.XAI_API_KEY) void maybeAdapt(message.channel);
+    if (hits >= 2 && granted(message.author.id, "ai") && aiReady()) void maybeAdapt(message.channel);
     return;
   }
   if (infiltration(content)) {
