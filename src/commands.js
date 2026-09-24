@@ -124,13 +124,17 @@ function remember(found, token, bodyRaw) {
   found.push({ key: parts.key, body, alias: parts.alias });
 }
 
+function normalizeMentions(text) {
+  return String(text ?? "").replace(/<\/([a-z0-9_-]+(?:\s+[a-z0-9_-]+)*):\d+>/gi, (_, name) => `\n/${name.trim().toLowerCase().replace(/\s+/g, "-")}\n`);
+}
+
 function eatenLines(text) {
   const found = [];
   let pending = "";
   const only = new RegExp(`^(${COMMAND_TOKEN})$`, "i");
   const withBody = new RegExp(`^(${COMMAND_TOKEN})\\s+(?:[-–:—|]+\\s*)?(.{2,200})$`, "i");
-  for (const raw of String(text ?? "").split("\n")) {
-    const line = raw.replace(/[*_`>|]/g, "").trim();
+  for (const raw of normalizeMentions(text).split("\n")) {
+    const line = raw.replace(/[*_`~|]/g, "").trim();
     if (!line) continue;
     const alone = only.exec(line);
     if (alone) {
@@ -157,7 +161,7 @@ function eatenLines(text) {
 }
 
 function pushLines(lines, value) {
-  for (const raw of String(value ?? "").split("\n")) {
+  for (const raw of normalizeMentions(value).split("\n")) {
     const clean = raw.replace(/[*_`~>|]/g, "").trim();
     if (clean) lines.push(clean);
   }
@@ -170,15 +174,8 @@ function messageText(message) {
     pushLines(lines, embed.description);
     pushLines(lines, embed.footer?.text);
     for (const field of embed.fields ?? []) {
-      const name = String(field.name ?? "").replace(/[*_`~>|]/g, "").trim();
-      const value = String(field.value ?? "").replace(/[*_`~>|]/g, "").trim();
-      if (/^(?:\/[a-z0-9-]{2,32}|[a-z0-9]{0,8}[!?.^~][a-z0-9-]{2,32})$/i.test(name.replace(/\s/g, ""))) {
-        lines.push(name.replace(/\s/g, ""));
-        pushLines(lines, value);
-      } else {
-        pushLines(lines, name);
-        pushLines(lines, value);
-      }
+      pushLines(lines, field.name);
+      pushLines(lines, field.value);
     }
   }
   return lines.join("\n");
