@@ -96,6 +96,21 @@ const RULES_TEXT = [
   "Die KI ist davon getrennt. Erst /freigabe schickt Frage und Gedächtnis an xAI in die USA. Ohne Freigabe bleibt /ki aus.",
 ].join("\n");
 
+function eatenLines(text) {
+  const found = [];
+  for (const line of text.split(/\n|;(?=\s*\/?!?[a-z0-9-])/i)) {
+    const match = /(?:^|\s)(?:\/|!)?([a-z0-9-]{2,32})\s+[-–:]?\s*(.{2,200})/i.exec(line.trim());
+    if (!match) continue;
+    const key = cleanKey(match[1]);
+    const body = match[2].trim().slice(0, 200);
+    if (!SLASH_NAME.test(key) || catalog.some((item) => item[0] === key)) continue;
+    if (!body || personalData(`${key} ${body}`) || infiltration(`${key} ${body}`)) continue;
+    if (found.some((item) => item.key === key)) continue;
+    found.push({ key, body });
+  }
+  return found.slice(0, 25);
+}
+
 function customReply(name) {
   return memoryRows("command").find((row) => row.item_key === name)?.body ?? null;
 }
@@ -134,6 +149,7 @@ export const catalog = [
   ["einladen", "Erstellt einen Einladungslink", "Server"],
   ["bots", "Bots auf diesem Server", "Andere Bots"],
   ["adaptieren", "Übernimmt eine Funktion eines Bots", "Andere Bots"],
+  ["eatbot", "Übernimmt alle sichtbaren Funktionen eines Bots", "Andere Bots"],
   ["steuern", "Führt eine übernommene Funktion aus", "Andere Bots"],
   ["recht", "Schaltet ein Rollenrecht an oder aus", "Server"],
   ["filter", "Wortfilter, Links und Großschrift", "Server"],
@@ -252,6 +268,10 @@ export function slashCommands() {
         .addStringOption((o) => o.setName("befehl").setDescription("Befehlsname").setRequired(true))
         .addStringOption((o) => o.setName("antwort").setDescription("Was Axi darauf antwortet").setRequired(true))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+    eatbot: (b) =>
+      b
+        .addStringOption((o) => o.setName("bot").setDescription("Bot auf diesem Server").setRequired(true).setAutocomplete(true))
+        .addStringOption((o) => o.setName("liste").setDescription("Optional: eine Zeile pro Befehl, Name und Antwort")),
     steuern: (b) =>
       b
         .addStringOption((o) => o.setName("bot").setDescription("Bot auf diesem Server").setRequired(true).setAutocomplete(true))
@@ -613,6 +633,31 @@ export async function runCommand(name, ctx) {
       saveRepertoire(key, botUser.id, botUser.username);
       await refreshSlash();
       return ctx.reply({ content: `/${key} gehört jetzt Axi, Kategorie ${botUser.username}. ${botUser} führt sie nicht aus.` });
+    }
+    case "eatbot": {
+      if (!allows(member, "bots")) return ctx.reply({ content: deny("bots") });
+      const botUser = await resolveBot(ctx);
+      if (!botUser) return ctx.reply({ content: "Nenn einen Bot aus den Vorschlägen." });
+      let source = ctx.text("liste").trim();
+      if (!source && ctx.channel?.messages) {
+        const fetched = await ctx.channel.messages.fetch({ limit: 100 }).catch(() => null);
+        source = [...(fetched?.values() ?? [])]
+          .filter((item) => item.author.id === botUser.id)
+          .map((item) => [item.content, ...(item.embeds ?? []).map((embed) => [embed.title, embed.description, ...(embed.fields ?? []).map((field) => `${field.name} ${field.value}`)].filter(Boolean).join("\n"))].filter(Boolean).join("\n"))
+          .join("\n");
+      }
+      const rows = eatenLines(source);
+      if (!rows.length) {
+        return ctx.reply({
+          content: "Discord gibt die Befehlsliste eines anderen Bots nicht heraus. Schreib seine Hilfe in diesen Kanal oder füge sie bei /eatbot unter liste ein, eine Zeile pro Befehl: tide Die Tide dreht.",
+        });
+      }
+      for (const row of rows) {
+        putMemory("command", row.key, row.body);
+        saveRepertoire(row.key, botUser.id, botUser.username);
+      }
+      await refreshSlash();
+      return ctx.reply({ content: `${rows.length} Funktionen von ${botUser.username} liegen jetzt bei Axi: ${rows.map((row) => `/${row.key}`).join(", ")}. ${botUser} selbst bleibt unverändert.` });
     }
     case "steuern": {
       const botUser = await resolveBot(ctx);

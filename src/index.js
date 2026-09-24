@@ -208,7 +208,7 @@ function known(name) {
   return [
     "hilfe", "ping", "server", "zeit", "rechnen", "user", "avatar", "level", "rangliste", "umfrage", "erinnerung",
     "wuerfel", "muenze", "achtball", "witz", "ticket", "schliessen", "warn", "verwarnungen", "timeout", "kick", "ban",
-    "clear", "slowmode", "sagen", "sicherheit", "hierarchie", "rolle", "kanal", "ueberblick", "einladen", "bots", "adaptieren", "steuern", "recht", "filter", "willkommen", "status", "log", "modul", "modell",
+    "clear", "slowmode", "sagen", "sicherheit", "hierarchie", "rolle", "kanal", "ueberblick", "einladen", "bots", "adaptieren", "eatbot", "steuern", "recht", "filter", "willkommen", "status", "log", "modul", "modell",
     "befehl", "entfernen", "wissen", "ki", "anpassen", "optimieren", "regeln", "akzeptieren", "freigabe", "widerruf",
   ].includes(name);
 }
