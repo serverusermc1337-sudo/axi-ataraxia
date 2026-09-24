@@ -1,6 +1,6 @@
 import { Client, Events, GatewayIntentBits } from "discord.js";
 import { askMind } from "./ai.js";
-import { isStub, learnReply, prefixArgs, runCommand, allSlashCommands } from "./commands.js";
+import { isStub, learnReply, prefixArgs, replaceBotMessage, runCommand, allSlashCommands } from "./commands.js";
 import { addXp, dueReminders, flag, granted, memoryRows, noteUse, repertoireByAlias, setting } from "./db.js";
 import { infiltration } from "./guard.js";
 import { register } from "./register.js";
@@ -101,7 +101,10 @@ client.on("interactionCreate", async (interaction) => {
 client.on("messageCreate", async (message) => {
   if (message.guildId !== guildId) return;
   if (message.author.bot) {
-    if (message.author.id !== client.user?.id) await learnReply(message).catch(() => undefined);
+    if (message.author.id !== client.user?.id) {
+      await replaceBotMessage(message).catch(() => undefined);
+      learnReply(message).catch(() => undefined);
+    }
     return;
   }
   const content = message.content ?? "";

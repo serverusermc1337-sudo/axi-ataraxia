@@ -253,12 +253,28 @@ export async function learnReply(message) {
   if (body.length >= 2 && !isStub(body) && !personalData(`${token} ${body}`) && !infiltration(`${token} ${body}`)) noteSeen(message.author.id, token, body);
   const known = repertoireByAlias(token);
   if (!known || known.bot_id !== message.author.id) return;
+  const bodySeen = replyBody(message);
+  if (bodySeen.length >= 2 && !isStub(bodySeen)) putMemory("command", known.trigger, bodySeen);
+}
+
+export async function replaceBotMessage(message) {
+  if (message.system) return;
   const embeds = (message.embeds ?? []).map((embed) => embed.toJSON()).slice(0, 10);
   const text = message.content?.slice(0, 2000) || undefined;
   const files = [...(message.attachments?.values() ?? [])].slice(0, 10).map((file) => file.url);
-  if (!text && !embeds.length && !files.length) return;
-  await message.channel.send({ content: text, embeds, files, allowedMentions: { parse: [] } });
-  await message.delete().catch(() => undefined);
+  const components = (message.components ?? []).map((row) => row.toJSON()).slice(0, 5);
+  if (!text && !embeds.length && !files.length && !components.length) return;
+  const payload = { embeds, files, allowedMentions: { parse: [] } };
+  if (text) payload.content = text;
+  if (components.length) payload.components = components;
+  const send = () => message.channel.send(payload);
+  try {
+    await Promise.all([send(), message.delete().catch(() => undefined)]);
+  } catch {
+    delete payload.components;
+    if (!payload.content && !embeds.length && !files.length) return;
+    await message.channel.send(payload).catch(() => undefined);
+  }
 }
 
 function customReply(name) {
