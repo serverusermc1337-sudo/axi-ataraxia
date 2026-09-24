@@ -31,7 +31,11 @@ const client = new Client({
 });
 
 client.once(Events.ClientReady, async (ready) => {
-  await register(token, clientId, guildId, allSlashCommands());
+  try {
+    await register(token, clientId, guildId, allSlashCommands());
+  } catch (error) {
+    console.error(error);
+  }
   ready.user.setPresence({ activities: [{ name: setting("status", "Ataraxia") }], status: "online" });
   startWeb();
   console.log(`Axi ist online als ${ready.user.tag}`);
@@ -39,14 +43,26 @@ client.once(Events.ClientReady, async (ready) => {
 
 client.on("interactionCreate", async (interaction) => {
   if (interaction.isAutocomplete() && interaction.guildId === guildId && interaction.options.getFocused(true).name === "bot") {
+    let answered = false;
+    const reply = async (choices) => {
+      if (answered) return;
+      answered = true;
+      await interaction.respond(choices).catch(() => undefined);
+    };
+    const timer = setTimeout(() => reply([]), 2000);
+    try {
+      await Promise.race([interaction.guild.members.fetch(), new Promise((resolve) => setTimeout(resolve, 1500))]);
+    } catch {
+      /* Cache reicht */
+    }
+    clearTimeout(timer);
     const query = String(interaction.options.getFocused()).toLowerCase();
-    await interaction.guild.members.fetch().catch(() => undefined);
     const choices = interaction.guild.members.cache
       .filter((item) => item.user.bot && item.id !== interaction.client.user.id)
       .filter((item) => !query || item.user.username.toLowerCase().includes(query) || item.displayName.toLowerCase().includes(query))
       .map((item) => ({ name: item.user.username.slice(0, 100), value: item.id }))
       .slice(0, 25);
-    await interaction.respond(choices).catch(() => undefined);
+    await reply(choices);
     return;
   }
   if (!interaction.isChatInputCommand() || interaction.guildId !== guildId) return;

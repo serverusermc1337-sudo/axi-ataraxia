@@ -510,8 +510,9 @@ export async function runCommand(name, ctx) {
   const target = ctx.userOf?.("mitglied") ?? ctx.user;
   switch (name) {
     case "hilfe": {
+      await ctx.defer();
       const pages = helpPages(ctx.guild?.name ?? "Ataraxia");
-      await ctx.reply({ content: pages[0] });
+      await ctx.edit({ content: pages[0] });
       for (const page of pages.slice(1)) await ctx.more({ content: page });
       return;
     }
@@ -738,8 +739,9 @@ export async function runCommand(name, ctx) {
     }
     case "eatbot": {
       if (!allows(member, "bots")) return ctx.reply({ content: deny("bots") });
+      await ctx.defer();
       const botUser = await resolveBot(ctx);
-      if (!botUser) return ctx.reply({ content: "Nenn einen Bot aus den Vorschlägen." });
+      if (!botUser) return ctx.edit({ content: "Nenn einen Bot aus den Vorschlägen." });
       let source = ctx.text("liste").trim();
       let pages = [];
       if (!source && ctx.channel?.messages) {
@@ -748,12 +750,12 @@ export async function runCommand(name, ctx) {
         source = fromBot.map((item) => messageText(item)).join("\n");
         pages = [...new Set(fromBot.flatMap((item) => menuPages(item)))];
         if (!fromBot.length) {
-          return ctx.reply({ content: "Von diesem Bot sind hier keine Nachrichten, auch keine Embeds. Seine Hilfe muss in diesem Kanal stehen, oder du fügst die Liste ein." });
+          return ctx.edit({ content: "Von diesem Bot sind hier keine Nachrichten, auch keine Embeds. Seine Hilfe muss in diesem Kanal stehen, oder du fügst die Liste ein." });
         }
       }
       const rows = eatenLines(source);
       if (!rows.length) {
-        return ctx.reply({
+        return ctx.edit({
           content: source
             ? "Nachrichten und Embeds gesehen, aber keine Befehle erkannt. Im Embed soll der Feldname der Befehl sein, oder eine Zeile: tide Die Tide dreht."
             : "Discord gibt die Befehlsliste eines anderen Bots nicht heraus. Seine Hilfe muss in diesem Kanal stehen, oder du fügst sie unter liste ein.",
@@ -766,7 +768,7 @@ export async function runCommand(name, ctx) {
       await refreshSlash();
       const label = (row) => (row.alias && !row.alias.startsWith("/") ? row.alias : `/${row.key}`);
       const extra = pages.length > 1 ? ` Offen ist nur eine Seite. Im Menü stehen noch: ${pages.join(", ")}. Jede Seite einmal aufklappen, danach /eatbot wieder.` : "";
-      return ctx.reply({ content: `${rows.length} Funktionen von ${botUser.username} liegen jetzt bei Axi: ${rows.map(label).join(", ")}. ${botUser} selbst bleibt unverändert.${extra}`.slice(0, 1900) });
+      return ctx.edit({ content: `${rows.length} Funktionen von ${botUser.username} liegen jetzt bei Axi: ${rows.map(label).join(", ")}. ${botUser} selbst bleibt unverändert.${extra}`.slice(0, 1900) });
     }
     case "steuern": {
       const botUser = await resolveBot(ctx);
