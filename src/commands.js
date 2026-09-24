@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, ChannelType, PermissionFlagsBits } from "discord.js";
+import { SlashCommandBuilder, ChannelType, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 import { askMind, knownModel } from "./ai.js";
 import { enqueue, leave, queueText, skip, tune } from "./music.js";
 import {
@@ -343,6 +343,7 @@ export const catalog = [
   ["filter", "Wortfilter, Links und Großschrift", "Server"],
   ["willkommen", "Text für neue Mitglieder", "Server"],
   ["status", "Statustext von Axi", "Server"],
+  ["selfrole", "Rollenknöpfe, nur für Administratoren", "Server"],
   ["log", "Kanal für das Mod-Log", "Server"],
   ["widerruf", "Zieht die Einwilligung zurück und löscht eigene Daten", "Lernen"],
   ["modul", "Schaltet ein Modul an oder aus", "Server"],
@@ -502,6 +503,18 @@ export function slashCommands() {
         .addStringOption((o) => o.setName("wert").setDescription("Wort, an/aus oder Prozent")),
     willkommen: (b) => b.addStringOption((o) => o.setName("text").setDescription("Text, {name} wird ersetzt").setRequired(true)),
     status: (b) => b.addStringOption((o) => o.setName("text").setDescription("Kurzer Status").setRequired(true)),
+    selfrole: (b) =>
+      b
+        .addStringOption((o) =>
+          o
+            .setName("aktion")
+            .setDescription("hinzu, weg oder anzeigen")
+            .setRequired(true)
+            .addChoices({ name: "hinzu", value: "hinzu" }, { name: "weg", value: "weg" }, { name: "anzeigen", value: "anzeigen" }),
+        )
+        .addStringOption((o) => o.setName("name").setDescription("Text auf dem Knopf"))
+        .addRoleOption((o) => o.setName("rolle").setDescription("Welche Rolle"))
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     log: (b) => b.addChannelOption((o) => o.setName("kanal").setDescription("Mod-Log").addChannelTypes(ChannelType.GuildText)),
     widerruf: (b) => b,
     modul: (b) =>
@@ -640,6 +653,68 @@ export async function takeBot(channel, botUser, liste = "") {
   const label = (row) => (row.alias && !row.alias.startsWith("/") ? row.alias : `/${row.key}`);
   const extra = pages.length > 1 ? ` Weitere Seiten im Menü: ${pages.join(", ")}.` : "";
   return { ok: true, text: `${rows.length} Funktionen von ${botUser.username}: ${rows.map(label).join(", ")}.${extra}`.slice(0, 500) };
+}
+
+function isAdmin(member, guild) {
+  return member?.id === guild?.ownerId || member?.permissions?.has(PermissionFlagsBits.Administrator);
+}
+
+function selfroleItems() {
+  return memoryRows("selfrole")
+    .map((row) => {
+      try {
+        const parsed = JSON.parse(row.body);
+        return { key: row.item_key, roleId: String(parsed.roleId || ""), label: String(parsed.label || row.item_key).slice(0, 80) };
+      } catch {
+        return null;
+      }
+    })
+    .filter((item) => item?.roleId);
+}
+
+function selfroleRows(items) {
+  const buttons = items.slice(0, 25).map((item) => new ButtonBuilder().setCustomId(`axi-role:${item.key}`).setLabel(item.label).setStyle(ButtonStyle.Secondary));
+  const rows = [];
+  for (let index = 0; index < buttons.length; index += 5) rows.push(new ActionRowBuilder().addComponents(buttons.slice(index, index + 5)));
+  return rows;
+}
+
+async function showSelfroles(channel) {
+  const items = selfroleItems();
+  const payload = {
+    content: items.length ? "Rollen zum Selbstnehmen. Nochmal drücken nimmt die Rolle wieder weg." : "Keine Rollenknöpfe.",
+    components: selfroleRows(items),
+  };
+  const savedChannel = setting("selfrole_channel", "");
+  const savedMessage = setting("selfrole_message", "");
+  if (savedChannel === channel.id && savedMessage) {
+    const message = await channel.messages.fetch(savedMessage).catch(() => null);
+    if (message) return message.edit(payload);
+  }
+  const message = await channel.send(payload);
+  setSetting("selfrole_channel", channel.id);
+  setSetting("selfrole_message", message.id);
+  return message;
+}
+
+export async function handleRoleButton(interaction) {
+  if (!interaction.isButton() || !interaction.customId.startsWith("axi-role:")) return false;
+  const item = selfroleItems().find((row) => row.key === interaction.customId.slice("axi-role:".length));
+  if (!item) {
+    await interaction.reply({ content: "Diesen Knopf gibt es nicht mehr.", ephemeral: true });
+    return true;
+  }
+  const role = interaction.guild.roles.cache.get(item.roleId);
+  const me = interaction.guild.members.me;
+  if (!role || !me?.permissions.has(PermissionFlagsBits.ManageRoles) || role.position >= me.roles.highest.position || role.permissions.has(PermissionFlagsBits.Administrator)) {
+    await interaction.reply({ content: "Die Rolle kann Axi nicht vergeben. Sie muss unter Axi liegen und darf kein Administrator sein.", ephemeral: true });
+    return true;
+  }
+  const has = interaction.member.roles.cache.has(role.id);
+  if (has) await interaction.member.roles.remove(role);
+  else await interaction.member.roles.add(role);
+  await interaction.reply({ content: has ? `${role.name} ist weg.` : `${role.name} ist an.`, ephemeral: true });
+  return true;
 }
 
 export async function runCommand(name, ctx) {
@@ -953,6 +1028,30 @@ export async function runCommand(name, ctx) {
       setSetting("status", text);
       await ctx.client.user.setPresence({ activities: [{ name: text }], status: "online" });
       return ctx.reply({ content: `Status: ${text}` });
+    }
+    case "selfrole": {
+      if (!isAdmin(member, ctx.guild)) return ctx.reply({ content: "Nur ein Server-Administrator." });
+      const action = ctx.text("aktion");
+      if (action === "anzeigen") {
+        await showSelfroles(ctx.channel);
+        return ctx.reply({ content: "Die Knöpfe stehen in diesem Kanal.", ephemeral: true });
+      }
+      const label = ctx.text("name").trim().slice(0, 80);
+      const key = cleanKey(label).slice(0, 16);
+      if (action === "weg") {
+        if (!KEY.test(key)) return ctx.reply({ content: "Den Namen kenne ich nicht." });
+        dropMemory("selfrole", key);
+        await showSelfroles(ctx.channel);
+        return ctx.reply({ content: `Knopf ${label || key} ist weg.`, ephemeral: true });
+      }
+      const role = ctx.roleOf?.("rolle");
+      if (!role || !KEY.test(key)) return ctx.reply({ content: "Name und Rolle angeben. Der Name braucht 2–16 Buchstaben." });
+      if (role.managed || role.id === ctx.guild.id || role.permissions.has(PermissionFlagsBits.Administrator)) return ctx.reply({ content: "Diese Rolle darf niemand sich selbst geben." });
+      const me = ctx.guild.members.me;
+      if (!me?.permissions.has(PermissionFlagsBits.ManageRoles) || role.position >= me.roles.highest.position) return ctx.reply({ content: "Axi muss die Rolle vergeben dürfen. Zieh seine Rolle über diese Rolle." });
+      putMemory("selfrole", key, JSON.stringify({ roleId: role.id, label }));
+      await showSelfroles(ctx.channel);
+      return ctx.reply({ content: `Knopf ${label} gibt ${role.name}.`, ephemeral: true });
     }
     case "log": {
       if (!allows(member, "modul")) return ctx.reply({ content: deny("modul") });

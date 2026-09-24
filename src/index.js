@@ -1,6 +1,6 @@
 import { Client, Events, GatewayIntentBits } from "discord.js";
 import { askMind, aiReady } from "./ai.js";
-import { isStub, learnReply, noteUserMessage, prefixArgs, replaceBotMessage, runCommand, allSlashCommands } from "./commands.js";
+import { isStub, handleRoleButton, learnReply, noteUserMessage, prefixArgs, replaceBotMessage, runCommand, allSlashCommands } from "./commands.js";
 import { addXp, dueReminders, flag, granted, memoryRows, noteUse, repertoireByAlias, setting } from "./db.js";
 import { infiltration } from "./guard.js";
 import { register } from "./register.js";
@@ -67,6 +67,10 @@ client.on("interactionCreate", async (interaction) => {
     await reply(choices);
     return;
   }
+  if (interaction.isButton() && interaction.guildId === guildId) {
+    const handled = await handleRoleButton(interaction).catch(() => false);
+    if (handled) return;
+  }
   if (!interaction.isChatInputCommand() || interaction.guildId !== guildId) return;
   const denied = gate(interaction.commandName, interaction.user.id);
   if (denied) {
@@ -80,6 +84,7 @@ client.on("interactionCreate", async (interaction) => {
     user: interaction.user,
     client,
     text: (name) => interaction.options.getString(name) ?? "",
+    roleOf: (name) => interaction.options.getRole(name),
     int: (name) => interaction.options.getInteger(name) ?? 0,
     userOf: (name) => interaction.options.getUser(name),
     channelOf: (name) => interaction.options.getChannel(name),
@@ -243,7 +248,7 @@ function known(name) {
     "hilfe", "ping", "server", "zeit", "rechnen", "user", "avatar", "level", "rangliste", "umfrage", "erinnerung",
     "wuerfel", "muenze", "achtball", "witz", "play", "skip", "stop", "warteschlange", "aktuell", "radio", "ticket", "schliessen", "warn", "verwarnungen", "timeout", "kick", "ban",
     "clear", "slowmode", "sagen", "sicherheit", "hierarchie", "rolle", "kanal", "ueberblick", "einladen", "bots", "adaptieren", "eatbot", "steuern", "recht", "filter", "willkommen", "status", "log", "modul", "modell",
-    "befehl", "entfernen", "wissen", "ki", "anpassen", "optimieren", "regeln", "akzeptieren", "freigabe", "widerruf",
+    "befehl", "entfernen", "wissen", "ki", "anpassen", "optimieren", "regeln", "akzeptieren", "freigabe", "widerruf", "selfrole",
   ].includes(name);
 }
 
