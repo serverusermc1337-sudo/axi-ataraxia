@@ -96,19 +96,44 @@ const RULES_TEXT = [
   "Die KI ist davon getrennt. Erst /freigabe schickt Frage und Gedächtnis an xAI in die USA. Ohne Freigabe bleibt /ki aus.",
 ].join("\n");
 
+function plain(value) {
+  return String(value ?? "")
+    .replace(/[*_`~>|]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function remember(found, keyRaw, bodyRaw) {
+  const key = cleanKey(plain(keyRaw).replace(/^[!/]+/, ""));
+  const body = plain(bodyRaw).slice(0, 200);
+  if (!SLASH_NAME.test(key) || key.length < 2 || catalog.some((item) => item[0] === key)) return;
+  if (body.length < 2 || personalData(`${key} ${body}`) || infiltration(`${key} ${body}`)) return;
+  if (found.some((item) => item.key === key)) return;
+  found.push({ key, body });
+}
+
 function eatenLines(text) {
   const found = [];
-  for (const line of text.split(/\n|;(?=\s*\/?!?[a-z0-9-])/i)) {
-    const match = /(?:^|\s)(?:\/|!)?([a-z0-9-]{2,32})\s+[-–:]?\s*(.{2,200})/i.exec(line.trim());
-    if (!match) continue;
-    const key = cleanKey(match[1]);
-    const body = match[2].trim().slice(0, 200);
-    if (!SLASH_NAME.test(key) || catalog.some((item) => item[0] === key)) continue;
-    if (!body || personalData(`${key} ${body}`) || infiltration(`${key} ${body}`)) continue;
-    if (found.some((item) => item.key === key)) continue;
-    found.push({ key, body });
+  for (const line of String(text ?? "").split("\n")) {
+    const clean = plain(line);
+    const match = /^(?:\/|!)?([a-z0-9-]{2,32})\s*(?:[-–:—|]+|\s)\s*(.{2,200})$/i.exec(clean);
+    if (match) remember(found, match[1], match[2]);
   }
   return found.slice(0, 25);
+}
+
+function messageText(message) {
+  const lines = [message.content];
+  for (const embed of message.embeds ?? []) {
+    lines.push(embed.title, embed.description, embed.author?.name, embed.footer?.text);
+    for (const field of embed.fields ?? []) {
+      const name = plain(field.name).replace(/^[!/]+/, "");
+      const value = plain(field.value);
+      if (/^[a-z0-9-]{2,32}$/i.test(name) && value.length >= 2) lines.push(`${name} ${value}`);
+      else lines.push(`${plain(field.name)} ${value}`);
+    }
+  }
+  return lines.filter(Boolean).join("\n");
 }
 
 function customReply(name) {
@@ -641,15 +666,18 @@ export async function runCommand(name, ctx) {
       let source = ctx.text("liste").trim();
       if (!source && ctx.channel?.messages) {
         const fetched = await ctx.channel.messages.fetch({ limit: 100 }).catch(() => null);
-        source = [...(fetched?.values() ?? [])]
-          .filter((item) => item.author.id === botUser.id)
-          .map((item) => [item.content, ...(item.embeds ?? []).map((embed) => [embed.title, embed.description, ...(embed.fields ?? []).map((field) => `${field.name} ${field.value}`)].filter(Boolean).join("\n"))].filter(Boolean).join("\n"))
-          .join("\n");
+        const fromBot = [...(fetched?.values() ?? [])].filter((item) => item.author.id === botUser.id);
+        source = fromBot.map((item) => messageText(item)).join("\n");
+        if (!fromBot.length) {
+          return ctx.reply({ content: "Von diesem Bot sind hier keine Nachrichten, auch keine Embeds. Seine Hilfe muss in diesem Kanal stehen, oder du fügst die Liste ein." });
+        }
       }
       const rows = eatenLines(source);
       if (!rows.length) {
         return ctx.reply({
-          content: "Discord gibt die Befehlsliste eines anderen Bots nicht heraus. Schreib seine Hilfe in diesen Kanal oder füge sie bei /eatbot unter liste ein, eine Zeile pro Befehl: tide Die Tide dreht.",
+          content: source
+            ? "Nachrichten und Embeds gesehen, aber keine Befehle erkannt. Im Embed soll der Feldname der Befehl sein, oder eine Zeile: tide Die Tide dreht."
+            : "Discord gibt die Befehlsliste eines anderen Bots nicht heraus. Seine Hilfe muss in diesem Kanal stehen, oder du fügst sie unter liste ein.",
         });
       }
       for (const row of rows) {
