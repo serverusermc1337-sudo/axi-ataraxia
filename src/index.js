@@ -38,6 +38,17 @@ client.once(Events.ClientReady, async (ready) => {
 });
 
 client.on("interactionCreate", async (interaction) => {
+  if (interaction.isAutocomplete() && interaction.guildId === guildId && interaction.options.getFocused(true).name === "bot") {
+    const query = String(interaction.options.getFocused()).toLowerCase();
+    await interaction.guild.members.fetch().catch(() => undefined);
+    const choices = interaction.guild.members.cache
+      .filter((item) => item.user.bot && item.id !== interaction.client.user.id)
+      .filter((item) => !query || item.user.username.toLowerCase().includes(query) || item.displayName.toLowerCase().includes(query))
+      .map((item) => ({ name: item.user.username.slice(0, 100), value: item.id }))
+      .slice(0, 25);
+    await interaction.respond(choices).catch(() => undefined);
+    return;
+  }
   if (!interaction.isChatInputCommand() || interaction.guildId !== guildId) return;
   const denied = gate(interaction.commandName, interaction.user.id);
   if (denied) {

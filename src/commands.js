@@ -77,6 +77,14 @@ function hierarchyBlock(guild, actor, target) {
   return null;
 }
 
+async function resolveBot(ctx) {
+  const raw = ctx.text("bot").trim();
+  if (!/^\d{17,20}$/.test(raw)) return null;
+  const user = await ctx.client.users.fetch(raw).catch(() => null);
+  if (!user?.bot || user.id === ctx.client.user.id) return null;
+  return user;
+}
+
 function modRole(guild) {
   return guild.roles.cache.find((role) => role.name.toLowerCase() === "mod") ?? null;
 }
@@ -240,13 +248,13 @@ export function slashCommands() {
     bots: (b) => b,
     adaptieren: (b) =>
       b
-        .addUserOption((o) => o.setName("bot").setDescription("Welcher Bot").setRequired(true))
+        .addStringOption((o) => o.setName("bot").setDescription("Bot auf diesem Server").setRequired(true).setAutocomplete(true))
         .addStringOption((o) => o.setName("befehl").setDescription("Befehlsname").setRequired(true))
         .addStringOption((o) => o.setName("antwort").setDescription("Was Axi darauf antwortet").setRequired(true))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
     steuern: (b) =>
       b
-        .addUserOption((o) => o.setName("bot").setDescription("Welcher Bot").setRequired(true))
+        .addStringOption((o) => o.setName("bot").setDescription("Bot auf diesem Server").setRequired(true).setAutocomplete(true))
         .addStringOption((o) => o.setName("befehl").setDescription("Übernommene Funktion, sonst nur die Liste")),
     recht: (b) =>
       b
@@ -594,8 +602,8 @@ export async function runCommand(name, ctx) {
     }
     case "adaptieren": {
       if (!allows(member, "bots")) return ctx.reply({ content: deny("bots") });
-      const botUser = ctx.userOf("bot");
-      if (!botUser?.bot || botUser.id === ctx.client.user.id) return ctx.reply({ content: "Nenn einen anderen Bot." });
+      const botUser = await resolveBot(ctx);
+      if (!botUser) return ctx.reply({ content: "Nenn einen anderen Bot. Im Feld nur die Vorschläge nehmen, keine normalen Mitglieder." });
       const key = cleanKey(ctx.text("befehl"));
       const body = ctx.text("antwort").trim().slice(0, 200);
       if (!KEY.test(key) || catalog.some((item) => item[0] === key)) return ctx.reply({ content: "Der Name geht nicht. 2–16 Buchstaben, kein fester Befehl." });
@@ -607,8 +615,8 @@ export async function runCommand(name, ctx) {
       return ctx.reply({ content: `/${key} gehört jetzt Axi, Kategorie ${botUser.username}. ${botUser} führt sie nicht aus.` });
     }
     case "steuern": {
-      const botUser = ctx.userOf("bot");
-      if (!botUser) return ctx.reply({ content: "Nenn den Bot." });
+      const botUser = await resolveBot(ctx);
+      if (!botUser) return ctx.reply({ content: "Nenn den Bot aus den Vorschlägen." });
       const rows = repertoireRows().filter((row) => row.bot_id === botUser.id);
       const wanted = cleanKey(ctx.text("befehl"));
       if (wanted) {
