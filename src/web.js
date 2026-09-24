@@ -57,7 +57,8 @@ function apply(body) {
   if (typeof body.status === "string" && body.status.trim()) {
     const text = body.status.slice(0, 60);
     setSetting("status", text);
-    liveClient?.user?.setPresence({ activities: [{ name: text }], status: "online" }).catch(() => undefined);
+    const presence = liveClient?.user?.setPresence?.({ activities: [{ name: text }], status: "online" });
+    if (presence?.catch) presence.catch(() => undefined);
   }
   if (typeof body.model === "string") setSetting("model", knownModel(body.model));
   if (body.caps != null) setSetting("caps", String(Math.max(0, Math.min(100, Number(body.caps) || 0))));
@@ -112,6 +113,32 @@ export function startWeb(client) {
       guildLists().then((lists) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ...snapshot(), ...lists }));
+      });
+      return;
+    }
+    if (url.pathname === "/api/remove" && req.method === "POST") {
+      let raw = "";
+      req.on("data", (chunk) => {
+        raw += chunk;
+        if (raw.length > 4000) req.destroy();
+      });
+      req.on("end", () => {
+        try {
+          const body = JSON.parse(raw);
+          const trigger = String(body.trigger || "");
+          if (trigger) {
+            dropMemory("command", trigger);
+            dropRepertoire(trigger);
+            refreshCommands().catch(() => undefined);
+          }
+          guildLists().then((lists) => {
+            res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ...snapshot(), ...lists }));
+          });
+        } catch {
+          res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ text: "Entfernen hat nicht geklappt." }));
+        }
       });
       return;
     }
@@ -295,13 +322,19 @@ function draw(state){
     const line = document.createElement("div");
     line.textContent = row.botName + " " + (row.alias || "/" + row.trigger) + " — " + row.body + " ";
     const button = document.createElement("button");
+    button.type = "button";
     button.textContent = "Entfernen";
-    button.onclick = () => save({remove:[row.trigger]});
+    button.style.cssText = "margin-left:8px;padding:6px 10px;border:0;border-radius:8px;background:#da373c;color:white";
+    button.onclick = async () => {
+      button.disabled = true;
+      const saved = await (await fetch("/api/remove", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({trigger: row.trigger})})).json();
+      document.getElementById("note").textContent = "Entfernt.";
+      draw(saved);
+    };
     line.append(button);
     reps.append(line);
   }
   box("Übernommene Funktionen", reps);
-  document.querySelectorAll("button").forEach(b => { if (b.textContent==="Entfernen") b.style.cssText="margin-left:8px"; });
 }
 async function save(patch){
   const state = await (await fetch("/api/state")).json();
