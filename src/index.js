@@ -66,6 +66,7 @@ client.on("interactionCreate", async (interaction) => {
     userOf: (name) => interaction.options.getUser(name),
     channelOf: (name) => interaction.options.getChannel(name),
     reply: (payload) => interaction.reply(typeof payload === "string" ? { content: payload } : payload),
+    more: (payload) => interaction.followUp(typeof payload === "string" ? { content: payload } : payload),
     defer: () => interaction.deferReply(),
     edit: (payload) => interaction.editReply(typeof payload === "string" ? { content: payload } : payload),
   };
@@ -139,6 +140,11 @@ client.on("messageCreate", async (message) => {
       const body = typeof payload === "string" ? { content: payload } : payload;
       if (body.ephemeral) body.ephemeral = undefined;
       return message.reply(body);
+    },
+    more: async (payload) => {
+      const body = typeof payload === "string" ? { content: payload } : payload;
+      if (body.ephemeral) body.ephemeral = undefined;
+      return message.channel.send(body);
     },
     defer: async () => {
       pending = await message.reply({ content: "Axi denkt nach." });

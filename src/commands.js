@@ -468,7 +468,20 @@ async function refreshSlash() {
   await register(token, clientId, guildId, allSlashCommands());
 }
 
-export function helpText() {
+function chunks(text) {
+  const parts = [];
+  let rest = text.trim();
+  while (rest.length > 1900) {
+    let cut = rest.lastIndexOf("\n", 1900);
+    if (cut < 400) cut = 1900;
+    parts.push(rest.slice(0, cut));
+    rest = rest.slice(cut).trim();
+  }
+  if (rest) parts.push(rest);
+  return parts;
+}
+
+export function helpPages(serverName) {
   const groups = ["Orientierung", "Leute", "Gespräch", "Anliegen", "Moderation", "Server", "Andere Bots", "Lernen"];
   const owned = new Set(repertoireRows().map((row) => row.trigger));
   const base = groups
@@ -486,15 +499,22 @@ export function helpText() {
     byBot.set(row.bot_id, bucket);
   }
   const blocks = [...byBot.values()].map((bucket) => `**${bucket.name}**\n<@${bucket.id}>\n${bucket.rows.join("\n")}`);
-  return [base, ...blocks].join("\n\n");
+  const pages = chunks(`Axi auf **${serverName}**.\n\n${base}`);
+  if (blocks.length) pages.push(...chunks(`**Übernommen**\n\n${blocks.join("\n\n")}`));
+  else pages.push("**Übernommen**\nNoch keine Funktionen von anderen Bots.");
+  return pages;
 }
 
 export async function runCommand(name, ctx) {
   const member = ctx.member;
   const target = ctx.userOf?.("mitglied") ?? ctx.user;
   switch (name) {
-    case "hilfe":
-      return ctx.reply({ content: `Axi auf **${ctx.guild?.name ?? "Ataraxia"}**.\n\n${helpText()}`.slice(0, 1900) });
+    case "hilfe": {
+      const pages = helpPages(ctx.guild?.name ?? "Ataraxia");
+      await ctx.reply({ content: pages[0] });
+      for (const page of pages.slice(1)) await ctx.more({ content: page });
+      return;
+    }
     case "ping":
       return ctx.reply({ content: "Pong. Axi ist wach." });
     case "server":
@@ -849,8 +869,12 @@ export async function runCommand(name, ctx) {
       return ctx.reply({ content: `/${key} ist aus dem Repertoire.` });
     }
     case "wissen": {
+      const taken = repertoireRows();
       const lines = [
-        ...memoryRows("command").map((row) => `!${row.item_key} — ${row.body}`),
+        ...memoryRows("command").map((row) => {
+          const owned = taken.find((item) => item.trigger === row.item_key);
+          return `${owned?.alias || `/${row.item_key}`} — ${row.body}`;
+        }),
         ...memoryRows("fact").map((row) => `${row.item_key}: ${row.body}`),
       ];
       return ctx.reply({ content: lines.join("\n").slice(0, 1900) || "Noch nichts gelernt." });
