@@ -58,6 +58,13 @@ db.exec(`
     bot_name text not null,
     alias text not null default ''
   );
+  create table if not exists seen_calls (
+    bot_id text not null,
+    alias text not null,
+    body text not null,
+    at integer not null,
+    primary key (bot_id, alias)
+  );
 `);
 try {
   db.exec("alter table repertoire add column alias text not null default ''");
@@ -206,6 +213,16 @@ export function saveRepertoire(trigger, botId, botName, alias = "") {
 
 export function dropRepertoire(trigger) {
   db.prepare("delete from repertoire where trigger = ?").run(trigger);
+}
+
+export function noteSeen(botId, alias, body) {
+  db.prepare(
+    "insert into seen_calls (bot_id, alias, body, at) values (?, ?, ?, ?) on conflict(bot_id, alias) do update set body = excluded.body, at = excluded.at",
+  ).run(botId, alias.slice(0, 40), body.slice(0, 200), Date.now());
+}
+
+export function seenCalls(botId) {
+  return db.prepare("select alias, body from seen_calls where bot_id = ? order by alias").all(botId);
 }
 
 export function forgetUser(userId) {

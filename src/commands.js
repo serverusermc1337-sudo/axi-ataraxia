@@ -12,11 +12,13 @@ import {
   granted,
   listOverwrites,
   memoryRows,
+  noteSeen,
   noteUse,
   putMemory,
   repertoireRows,
   saveOverwrite,
   saveRepertoire,
+  seenCalls,
   setSetting,
   setting,
   topMembers,
@@ -191,6 +193,51 @@ function menuPages(message) {
     }
   }
   return pages;
+}
+
+const CALLED = /^([a-z0-9]{0,8}[!?.^~][a-z0-9-]{2,32})\b/i;
+
+function replyBody(message) {
+  return messageText(message).replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+export function callsIn(messages, botId) {
+  const list = [...messages.values()].sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+  const lines = [];
+  for (const item of list) {
+    if (item.author?.bot) continue;
+    const token = CALLED.exec(item.content?.trim() ?? "")?.[1];
+    if (!token) continue;
+    const reply = list.find(
+      (other) =>
+        other.author?.id === botId &&
+        other.createdTimestamp >= item.createdTimestamp &&
+        other.createdTimestamp - item.createdTimestamp < 20_000 &&
+        (other.reference?.messageId === item.id || other.createdTimestamp - item.createdTimestamp < 8_000),
+    );
+    const body = reply ? replyBody(reply) : "";
+    if (body.length < 2 || personalData(`${token} ${body}`) || infiltration(`${token} ${body}`)) continue;
+    lines.push(`${token} ${body}`);
+  }
+  return lines;
+}
+
+export async function learnReply(message) {
+  if (!message.author?.bot || !message.channel?.messages) return;
+  let source = null;
+  if (message.reference?.messageId) source = await message.fetchReference().catch(() => null);
+  if (!source || source.author?.bot) {
+    const recent = await message.channel.messages.fetch({ limit: 8 }).catch(() => null);
+    source = [...(recent?.values() ?? [])]
+      .filter((item) => item.id !== message.id && !item.author.bot && item.createdTimestamp <= message.createdTimestamp)
+      .sort((a, b) => b.createdTimestamp - a.createdTimestamp)
+      .find((item) => message.createdTimestamp - item.createdTimestamp < 20_000 && CALLED.test(item.content?.trim() ?? ""));
+  }
+  const token = CALLED.exec(source?.content?.trim() ?? "")?.[1];
+  if (!token) return;
+  const body = replyBody(message);
+  if (body.length < 2 || personalData(`${token} ${body}`) || infiltration(`${token} ${body}`)) return;
+  noteSeen(message.author.id, token, body);
 }
 
 function customReply(name) {
@@ -744,14 +791,22 @@ export async function runCommand(name, ctx) {
       if (!botUser) return ctx.edit({ content: "Nenn einen Bot aus den Vorschlägen." });
       let source = ctx.text("liste").trim();
       let pages = [];
+      let fromBot = [];
       if (!source && ctx.channel?.messages) {
         const fetched = await ctx.channel.messages.fetch({ limit: 100 }).catch(() => null);
-        const fromBot = [...(fetched?.values() ?? [])].filter((item) => item.author.id === botUser.id);
-        source = fromBot.map((item) => messageText(item)).join("\n");
+        const all = [...(fetched?.values() ?? [])];
+        fromBot = all.filter((item) => item.author.id === botUser.id);
+        const heard = [
+          ...seenCalls(botUser.id).map((row) => `${row.alias} ${row.body}`),
+          ...(fetched ? callsIn(fetched, botUser.id) : []),
+        ];
+        source = [...fromBot.map((item) => messageText(item)), ...heard].join("\n");
         pages = [...new Set(fromBot.flatMap((item) => menuPages(item)))];
-        if (!fromBot.length) {
-          return ctx.edit({ content: "Von diesem Bot sind hier keine Nachrichten, auch keine Embeds. Seine Hilfe muss in diesem Kanal stehen, oder du fügst die Liste ein." });
-        }
+      } else {
+        source = [...seenCalls(botUser.id).map((row) => `${row.alias} ${row.body}`), source].filter(Boolean).join("\n");
+      }
+      if (!source) {
+        return ctx.edit({ content: "Von diesem Bot sind hier keine Nachrichten. Schreib zum Beispiel m!play, warte auf seine Antwort, und ruf /eatbot noch einmal auf." });
       }
       const rows = eatenLines(source);
       if (!rows.length) {
