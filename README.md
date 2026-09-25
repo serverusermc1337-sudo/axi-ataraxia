@@ -15,7 +15,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-In `.env` gehören `DISCORD_TOKEN`, `DISCORD_CLIENT_ID` und `DISCORD_GUILD_ID`. Für die KI `LOCAL_AI_URL` (LM Studio), `GEMINI_API_KEY` oder `XAI_API_KEY`. Die KI ist aus, bis `/modul ki an`.
+In `.env` gehören `DISCORD_TOKEN`, `DISCORD_CLIENT_ID` und `DISCORD_GUILD_ID`. Die lokale KI startet mit dem Container. Die KI ist aus, bis `/modul ki an`.
 
 Im [Discord Developer Portal](https://discord.com/developers/applications) unter **Bot** die Intents **Server Members** und **Message Content** einschalten.
 

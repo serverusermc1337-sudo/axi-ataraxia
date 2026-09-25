@@ -1,4 +1,24 @@
 services:
+  ollama:
+    image: ollama/ollama
+    restart: unless-stopped
+    environment:
+      OLLAMA_MODEL: qwen2.5-coder:3b
+    volumes:
+      - ollama:/root/.ollama
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama serve &
+        pid=$$!
+        i=0
+        while [ $$i -lt 30 ]; do
+          ollama list && break
+          i=$$((i+1))
+          sleep 1
+        done
+        ollama pull "$$OLLAMA_MODEL"
+        wait $$pid
   axi:
     build: .
     restart: unless-stopped
@@ -8,6 +28,8 @@ services:
     environment:
       DATA_DIR: /data
       WEB_PORT: "8787"
+      LOCAL_AI_URL: http://ollama:11434/v1
+      LOCAL_AI_MODEL: qwen2.5-coder:3b
     ports:
       - "8787:8787"
     extra_hosts:
@@ -15,3 +37,4 @@ services:
 
 volumes:
   axi-data:
+  ollama:

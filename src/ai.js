@@ -20,7 +20,7 @@ function localBase() {
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return null;
   const host = url.hostname.toLowerCase();
-  const local = host === "localhost" || host === "host.docker.internal" || host.endsWith(".local") || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(host);
+  const local = host === "localhost" || host === "host.docker.internal" || host === "ollama" || host.endsWith(".local") || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(host);
   if (!local) return null;
   return url.href.replace(/\/$/, "");
 }
