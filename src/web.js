@@ -24,6 +24,7 @@ function snapshot() {
       levels: flag("levels"),
       welcome: flag("welcome"),
       tickets: flag("tickets"),
+      ki: setting("ki", "aus") === "an",
     },
     perms: permMatrix(),
     about: setting("about", "Privater Server Ataraxia."),
@@ -44,7 +45,7 @@ function snapshot() {
 }
 
 function apply(body) {
-  for (const key of ["automod", "levels", "welcome", "tickets"]) {
+  for (const key of ["automod", "levels", "welcome", "tickets", "ki"]) {
     if (key in (body.modules ?? {})) setSetting(key, body.modules[key] ? "an" : "aus");
   }
   for (const role of ["mod", "member"]) {
@@ -235,7 +236,7 @@ function draw(state){
   app.innerHTML = "";
   const box = (title, node) => { const s = document.createElement("section"); s.style.cssText="background:#2b2d31;border-radius:12px;padding:14px;display:grid;gap:8px"; s.innerHTML = "<h2 style='margin:0;font-size:16px'>"+title+"</h2>"; s.append(node); app.append(s); };
   const mods = document.createElement("div");
-  for (const key of ["automod","levels","welcome","tickets"]) {
+  for (const key of ["automod","levels","welcome","tickets","ki"]) {
     const label = document.createElement("label");
     label.innerHTML = "<input type=checkbox "+(state.modules[key]?"checked":"")+"> "+key;
     label.querySelector("input").onchange = (e) => save({modules:{...state.modules,[key]:e.target.checked}});

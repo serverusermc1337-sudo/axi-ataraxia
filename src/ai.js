@@ -4,8 +4,13 @@ import { KEY, cleanKey, infiltration, personalData } from "./guard.js";
 const MODELS = new Set(["grok-4.7", "grok-4.5", "grok-4.3"]);
 const HOUR = 12;
 
+export function aiEnabled() {
+  if (process.env.AI_ENABLED === "aus") return false;
+  return setting("ki", "aus") === "an";
+}
+
 export function aiReady() {
-  return Boolean(process.env.GEMINI_API_KEY || process.env.XAI_API_KEY);
+  return aiEnabled() && Boolean(process.env.GEMINI_API_KEY || process.env.XAI_API_KEY);
 }
 
 function provider() {
@@ -19,6 +24,7 @@ export function knownModel(id) {
 }
 
 export async function askMind(mode, prompt) {
+  if (!aiEnabled()) return { ok: false, error: "Die KI ist aus. Ein Administrator schaltet sie mit /modul ki an." };
   const which = provider();
   if (!which) return { ok: false, error: "Die KI ist nicht angeschlossen. GEMINI_API_KEY oder XAI_API_KEY fehlt auf dem Server." };
   if (personalData(prompt)) return { ok: false, error: "E-Mails und Telefonnummern gehen nicht an die KI." };

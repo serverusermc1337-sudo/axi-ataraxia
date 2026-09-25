@@ -3,6 +3,7 @@ import { once } from "node:events";
 import { EndBehaviorType } from "@discordjs/voice";
 import { PermissionFlagsBits } from "discord.js";
 import { memoryRows, setting } from "./db.js";
+import { aiEnabled } from "./ai.js";
 
 const require = createRequire(import.meta.url);
 const prism = require("prism-media");
@@ -90,7 +91,7 @@ async function muteForFive(member, channel) {
 }
 
 async function hear(connection, guild, userId) {
-  if (setting("voice_filter", "aus") !== "an" || busy.has(userId) || userId === guild.client.user?.id) return;
+  if (!aiEnabled() || setting("voice_filter", "aus") !== "an" || busy.has(userId) || userId === guild.client.user?.id) return;
   busy.add(userId);
   try {
     const opus = connection.receiver.subscribe(userId, { end: { behavior: EndBehaviorType.AfterSilence, duration: 900 } });

@@ -1,5 +1,5 @@
 import { SlashCommandBuilder, ChannelType, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
-import { askMind, knownModel } from "./ai.js";
+import { askMind, aiEnabled, knownModel } from "./ai.js";
 import { enqueue, joinVoice, leave, queueText, skip, tune, currentVoice } from "./music.js";
 import { armVoiceFilter } from "./voicefilter.js";
 import {
@@ -539,6 +539,7 @@ export function slashCommands() {
               { name: "levels", value: "levels" },
               { name: "welcome", value: "welcome" },
               { name: "tickets", value: "tickets" },
+              { name: "ki", value: "ki" },
             ),
         )
         .addStringOption((o) =>
@@ -1070,6 +1071,9 @@ export async function runCommand(name, ctx) {
     case "sprachfilter": {
       if (!isAdmin(member, ctx.guild)) return ctx.reply({ content: "Nur ein Server-Administrator." });
       const on = ctx.text("stand") === "an";
+      if (on && !aiEnabled()) {
+        return ctx.reply({ content: "Die KI ist aus. Erst /modul ki an, sonst versteht der Sprachfilter nichts." });
+      }
       setSetting("voice_filter", on ? "an" : "aus");
       if (on) armVoiceFilter(currentVoice(ctx.guild), ctx.guild);
       return ctx.reply({
