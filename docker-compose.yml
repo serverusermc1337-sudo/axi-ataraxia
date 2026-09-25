@@ -10,6 +10,8 @@ services:
       WEB_PORT: "8787"
     ports:
       - "8787:8787"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
   axi-data:

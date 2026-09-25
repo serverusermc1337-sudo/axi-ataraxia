@@ -9,11 +9,28 @@ export function aiEnabled() {
   return setting("ki", "aus") === "an";
 }
 
+function localBase() {
+  const raw = process.env.LOCAL_AI_URL?.trim();
+  if (!raw) return null;
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  const host = url.hostname.toLowerCase();
+  const local = host === "localhost" || host === "host.docker.internal" || host.endsWith(".local") || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(host);
+  if (!local) return null;
+  return url.href.replace(/\/$/, "");
+}
+
 export function aiReady() {
-  return aiEnabled() && Boolean(process.env.GEMINI_API_KEY || process.env.XAI_API_KEY);
+  return aiEnabled() && Boolean(localBase() || process.env.GEMINI_API_KEY || process.env.XAI_API_KEY);
 }
 
 function provider() {
+  if (localBase()) return "local";
   if (process.env.GEMINI_API_KEY && (!process.env.XAI_API_KEY || process.env.AI_PROVIDER === "gemini")) return "gemini";
   if (process.env.XAI_API_KEY) return "xai";
   return "";
@@ -26,7 +43,7 @@ export function knownModel(id) {
 export async function askMind(mode, prompt) {
   if (!aiEnabled()) return { ok: false, error: "Die KI ist aus. Ein Administrator schaltet sie mit /modul ki an." };
   const which = provider();
-  if (!which) return { ok: false, error: "Die KI ist nicht angeschlossen. GEMINI_API_KEY oder XAI_API_KEY fehlt auf dem Server." };
+  if (!which) return { ok: false, error: "Die KI ist nicht angeschlossen. LOCAL_AI_URL, GEMINI_API_KEY oder XAI_API_KEY fehlt auf dem Server." };
   if (personalData(prompt)) return { ok: false, error: "E-Mails und Telefonnummern gehen nicht an die KI." };
   if (infiltration(prompt)) return { ok: false, error: "Abgewiesen. Axi lernt keine Angriffe." };
   if (aiCount(Date.now() - 60 * 60 * 1000) >= HOUR) return { ok: false, error: "Axi hat diese Stunde genug gelernt." };
@@ -39,7 +56,7 @@ export async function askMind(mode, prompt) {
   const usage = usageBrief()
     .map((row) => (row.kind === "miss" ? `Unbekannt !${row.item_key} ${row.hits}×` : `Anfrage ${row.hits}×: ${row.sample || row.item_key}`))
     .join("\n");
-  const model = which === "gemini" ? "gemini-3.8-flash" : knownModel(setting("model", process.env.AI_MODEL || "grok-4.5"));
+  const model = which === "gemini" ? "gemini-3.8-flash" : which === "local" ? process.env.LOCAL_AI_MODEL?.trim() || "local" : knownModel(setting("model", process.env.AI_MODEL || "grok-4.5"));
   const system =
     "Du bist Axi, der Bot des privaten Servers Ataraxia. Antworte nur mit JSON {\"reply\":\"\",\"updates\":[]}. " +
     "reply ist deutsch, kurz, ohne Emoji. updates ändert nur das Gedächtnis, nie Programmcode, Rechte oder Rollen. " +
@@ -59,14 +76,58 @@ export async function askMind(mode, prompt) {
   noteAi();
   let response;
   try {
-    response = which === "gemini" ? await askGemini(process.env.GEMINI_API_KEY, model, system, user, mode) : await askGrok(process.env.XAI_API_KEY, model, system, user, mode);
+    response =
+      which === "gemini"
+        ? await askGemini(process.env.GEMINI_API_KEY, model, system, user, mode)
+        : which === "local"
+          ? await askLocal(model, system, user, mode)
+          : await askGrok(process.env.XAI_API_KEY, model, system, user, mode);
   } catch {
     return { ok: false, error: "Die KI ist nicht erreichbar." };
   }
-  if (!response.ok) return { ok: false, error: "Die KI hat abgelehnt." };
+  if (!response.ok) return { ok: false, error: which === "local" ? "Die lokale KI antwortet nicht. LM Studio muss laufen und im Netz erreichbar sein." : "Die KI hat abgelehnt." };
   const parsed = parse(response.text);
   const learned = apply(parsed.updates, mode === "ask" ? 2 : 4);
   return { ok: true, reply: parsed.reply || "Gemacht.", learned, model };
+}
+
+async function askLocal(model, system, user, mode) {
+  const base = localBase();
+  if (!base) return { ok: false };
+  let name = model;
+  if (!process.env.LOCAL_AI_MODEL?.trim()) {
+    const listed = await fetch(`${base}/models`, { signal: AbortSignal.timeout(4000) }).catch(() => null);
+    const payload = listed?.ok ? await listed.json().catch(() => null) : null;
+    name = payload?.data?.[0]?.id || name;
+  }
+  const headers = { "Content-Type": "application/json" };
+  if (process.env.LOCAL_AI_KEY) headers.Authorization = `Bearer ${process.env.LOCAL_AI_KEY}`;
+  const body = {
+    model: name,
+    temperature: mode === "ask" ? 0.4 : 0.2,
+    max_tokens: 500,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+  };
+  let response = await fetch(`${base}/chat/completions`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ ...body, response_format: { type: "json_object" } }),
+    signal: AbortSignal.timeout(60000),
+  });
+  if (response.status === 400) {
+    response = await fetch(`${base}/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(60000),
+    });
+  }
+  if (!response.ok) return { ok: false };
+  const payload = await response.json();
+  return { ok: true, text: payload.choices?.[0]?.message?.content ?? "" };
 }
 
 async function askGrok(key, model, system, user, mode) {
